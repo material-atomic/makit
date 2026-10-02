@@ -223,6 +223,6 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 
 ## Roadmap
 
-- Security first: more sources for the catalog (osv.dev, GitHub advisories), more package ecosystems (dpkg, pip, Go
-  binaries), a Scan tab in `makit top`, scheduled scans with alerts.
-- Monitoring: a small agent and ready-made images for metrics, logs and alerts.
+Next is v0.6: the request shield for clusters behind a cloud load balancer (AWS ALB/NLB first) — a container image and
+Helm chart, ingress-nginx and Traefik in ask mode, one ban list shared by every replica. Everything planned, and what is
+not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).

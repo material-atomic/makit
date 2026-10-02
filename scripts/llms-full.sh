@@ -44,3 +44,5 @@ for g in "${guides[@]}"; do
 done
 printf '\n---\n\n<!-- source: %s/docs/security/README.md -->\n\n' "$blob"
 absolutize docs/security/README.md
+printf '\n---\n\n<!-- source: %s/ROADMAP.md -->\n\n' "$blob"
+absolutize ROADMAP.md
