@@ -1,0 +1,18 @@
+{
+  "name": "makit built-in indicators",
+  "sources": [
+    "https://github.com/ngvcanh/CVE-2025-55182-Attack-Analysis"
+  ],
+  "sha256": [
+    { "value": "0f0f9c339fcc267ec3d560c7168c56f607232cbeb158cb02a0818720a54e72ce", "note": "Linux.BackDoor.Siggen.389 — Go backdoor dropped via CVE-2025-55182 (React2Shell) as /tmp/vim" }
+  ],
+  "ips": [
+    { "value": "45.76.155.14", "note": "CVE-2025-55182 malware distribution server" }
+  ],
+  "strings": [
+    { "value": "45.76.155.14", "note": "CVE-2025-55182 malware distribution server" }
+  ],
+  "paths": [
+    { "value": "/tmp/vim", "note": "CVE-2025-55182 dropper path (binary disguised as vim)" }
+  ]
+}

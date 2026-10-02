@@ -3,7 +3,7 @@
 Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatably.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.1.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.2.0/install.sh | bash
 makit init --dry-run     # see what would change
 makit init               # do it
 ```
@@ -27,6 +27,9 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | `makit updates` | Unattended security upgrades (reboots stay manual). |
 | `makit ssh` | Disables SSH password login, root keeps key login. **Skipped if root has no authorized key.** |
 | `makit status` | Read-only summary: RAM, swap, disks, Docker, firewall, SSH, kernel settings, pending reboot. |
+| `makit list [--json]` | Each part makit manages and whether it is in place (the Setup tab uses this). |
+| `makit top` | Terminal dashboard with mouse support — see below. |
+| `makit scan [options]` | Read-only malware check of the host and/or containers — see below. |
 | `makit self-update [vX.Y.Z]` | Installs another release (default: latest). |
 
 Global options: `--dry-run` (change nothing), `--yes` (confirm prompts, e.g. `--format` without a terminal).
@@ -36,6 +39,51 @@ Global options: `--dry-run` (change nothing), `--yes` (confirm prompts, e.g. `--
 ```bash
 makit init --sysctl opensearch --volume auto --mount /mnt/data --docker-volumes --format
 ```
+
+## makit top
+
+A terminal dashboard, no htop needed. Mouse: click tabs, click column headers to sort, scroll with the wheel, click a
+row to select it (click again to open), click buttons. Keyboard: `1`–`7`, arrows, `/` to filter, `q` to quit.
+
+| Tab | Shows | Actions (asks first, needs root) |
+| --- | --- | --- |
+| Overview | CPU per core + history, memory, swap, network, disks, top processes, health summary | — |
+| Processes | All processes: CPU%, memory, threads, state, command | `k` send SIGTERM |
+| Containers | Docker containers with CPU and memory | logs, restart, start/stop |
+| Services | systemd services (`f` failed only) | journal, restart |
+| Disks | Usage per filesystem, read/write per disk | — |
+| Logs | System journal (follows the end) | — |
+| Setup | Everything `makit init` manages, ✓/✗ per item | Install / re-run with a live log, "install all missing" |
+
+## makit scan
+
+A **read-only** search for malware dropped on a server or inside containers — for example the Go backdoor dropped
+through CVE-2025-55182 (React2Shell) as `/tmp/vim`, started with `nohup` and then deleted
+([analysis](https://github.com/ngvcanh/CVE-2025-55182-Attack-Analysis)).
+
+```bash
+makit scan                              # the host (all processes, including those in containers)
+makit scan --container web             # one container's filesystem, seen from the host — no docker exec
+makit scan --all-containers --host      # everything
+makit scan --json --consent > report.json   # automation: --consent replaces the interactive confirmation
+```
+
+Before anything is read, makit lists what it will look at and asks you to type `yes`. **It never modifies, deletes,
+moves, quarantines, executes or uploads anything** — it prints findings with evidence and suggested next steps.
+
+What it looks for:
+
+- **Processes** running a deleted executable (run-then-`rm`), from `/tmp`, `/dev/shm` or a hidden directory, from memory
+  only (memfd), disguised as kernel threads (`[kworker/0:1]`) or named like a system tool they are not.
+- **Network** connections to known-bad IPs, to common miner/backdoor ports, or from those suspicious processes.
+- **Files** in temporary and home directories: unexpected or hidden executables, SHA256 matches with known malware,
+  Go binaries with backdoor traits (HTTP + SOCKS5 + TLS/ChaCha20), downloader scripts (`wget … -O /tmp/…; chmod +x;
+  nohup`); in containers, every file added or changed since the image (`docker diff`).
+- **Persistence**: cron, systemd units, `rc.local`, `/etc/ld.so.preload`, shell profiles, recently changed SSH keys.
+- **Entry points**: installed Next.js / React Server Components versions vulnerable to CVE-2025-55182.
+
+Indicators: a built-in set (`makit scan --list-iocs`) plus your own with `--iocs file.json` (same JSON shape).
+Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent not given.
 
 ## Safety
 
@@ -53,7 +101,7 @@ makit init --sysctl opensearch --volume auto --mount /mnt/data --docker-volumes 
 Pin a version (never `main`) and, if you like, check the release tarball:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.1.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.2.0/install.sh -o install.sh
 less install.sh
 MAKIT_SHA256=<sha256 from the release notes> bash install.sh
 ```
@@ -65,16 +113,24 @@ The installer puts each version in `/opt/makit/<version>`, points `/opt/makit/cu
 
 Ubuntu 20.04+ or Debian 11+ (or derivatives), amd64 or arm64, run as root.
 
+## License
+
+MIT — free for any use.
+
 ## Development
 
 ```bash
-tests/smoke.sh      # runs makit in throwaway ubuntu:24.04 and debian:12 containers
+tests/smoke.sh          # makit in throwaway ubuntu:24.04 and debian:12 containers
+scripts/build.sh        # gofmt + vet + tests, then makit-core for linux/amd64 and arm64 into dist/
+scripts/release.sh X.Y.Z    # bump, tag, push, build and publish the GitHub release
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash bin/makit lib/common.sh lib/cmd/*.sh install.sh
 ```
 
-Each command is one file in `lib/cmd/` defining `cmd_<name>`; `bin/makit` dispatches to it.
+Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit` dispatches to them. `makit top` and
+`makit scan` live in `core/` (Go, no cgo): `core/sys` reads `/proc` and the Docker socket, `core/top` is the dashboard,
+`core/scan` the scanner.
 
 ## Roadmap
 
-- `makit top`: a built-in terminal dashboard (CPU, memory, disks, containers, services, logs) — no htop needed.
+- A Scan tab in `makit top`, and scheduled scans with alerts.
 - Monitoring: a small agent and ready-made images for metrics, logs and alerts.

@@ -22,5 +22,6 @@ for img in ubuntu:24.04 debian:12; do
     $m volume /dev/null /mnt/x 2>&1 | tail -1 || true
     $m bogus 2>&1 | tail -1 || true
     $m status > /tmp/st; head -4 /tmp/st
+    $m list > /tmp/l; head -3 /tmp/l
   '
 done

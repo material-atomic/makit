@@ -30,6 +30,9 @@ Commands:
   updates     Enable automatic security updates
   ssh         Disable SSH password login (only if a key is installed)
   status      Show what makit manages on this machine
+  list        Each managed part and whether it is in place (--json for tools)
+  top         Terminal dashboard: system, processes, containers, services, logs, setup
+  scan        Read-only malware check of the host or containers (asks for consent first)
   self-update Install another makit version (makit self-update [vX.Y.Z])
   version     Print the version
 
