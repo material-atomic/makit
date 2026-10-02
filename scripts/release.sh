@@ -15,6 +15,7 @@ git push -q origin main "$tag"
 scripts/build.sh "$v"
 sleep 3
 tarsum=$(curl -fsSL "https://codeload.github.com/material-atomic/makit/tar.gz/refs/tags/$tag" | shasum -a 256 | cut -d' ' -f1)
+echo "$tarsum  makit-$tag.tar.gz" >> dist/SHA256SUMS   # install.sh verifies the source with it
 notes=$(awk -v t="## $tag" '$0==t{f=1;next} /^## /{f=0} f' CHANGELOG.md)
 gh release create "$tag" dist/makit-core-linux-amd64 dist/makit-core-linux-arm64 dist/SHA256SUMS --title "makit $tag" --notes "$notes
 
@@ -23,5 +24,5 @@ curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/$tag/install.
 \`\`\`
 
 Source tarball SHA256 (\`MAKIT_SHA256\`): \`$tarsum\`
-makit-core binaries: see \`SHA256SUMS\` (verified by install.sh)."
+Source tarball and makit-core binaries: \`SHA256SUMS\` (verified by install.sh)."
 echo "released $tag"
