@@ -50,7 +50,11 @@ type Config struct {
 		MaxMB int    `yaml:"max_mb"`
 		Keep  int    `yaml:"keep"`
 	} `yaml:"snapshot"`
-	Admin string `yaml:"admin"` // local status endpoint, default 127.0.0.1:9180
+	Admin   string `yaml:"admin"` // local status endpoint, default 127.0.0.1:9180
+	Scoring struct {
+		ScoringOverrides `yaml:",inline"`
+		File             string `yaml:"file"` // your own scoring file instead of the catalog's (same format)
+	} `yaml:"scoring"`
 }
 
 func LoadConfig(path string) (*Config, error) {

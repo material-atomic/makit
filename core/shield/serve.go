@@ -42,6 +42,11 @@ func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error
 			return nil, nil, err
 		}
 	}
+	if cfg.Scoring.Enabled == nil || *cfg.Scoring.Enabled {
+		if p.Scoring, err = LoadScoring(dirs, cfg.Scoring.File, cfg.Scoring.ScoringOverrides); err != nil {
+			return nil, nil, err
+		}
+	}
 	return p, st, nil
 }
 
@@ -146,7 +151,9 @@ func Serve(cfgPath string, dirs []string) error {
 			}
 		}(c.Listeners)
 	}
-	// Bulk lists are re-read only when their files change; bans and config reloads reuse them.
+	// Bulk lists are re-read only when their files change; bans and config reloads reuse them. The score tracker
+	// survives reloads so per-IP history is not lost.
+	var tracker *Tracker
 	var lists *Set
 	var listsFP string
 	kernelWasOn := false
@@ -167,7 +174,14 @@ func Serve(cfgPath string, dirs []string) error {
 		if err != nil {
 			return err
 		}
-		p.Ban = func(a netip.Addr, rule HTTPRule) { g.autoBan(a, rule, c.KernelBlock) }
+		p.Ban = func(a netip.Addr, d time.Duration, src, why string) { g.autoBan(a, d, src, why, c.KernelBlock) }
+		if p.Scoring != nil {
+			if tracker == nil || tracker.sc.Window != p.Scoring.Window {
+				tracker = NewTracker(p.Scoring, 200000)
+			}
+			tracker.sc = p.Scoring
+			p.Tracker = tracker
+		}
 		cfg = c
 		g.header = c.ClientHeader
 		g.policy.Store(p)
@@ -275,10 +289,13 @@ func Serve(cfgPath string, dirs []string) error {
 	return asrv.Shutdown(sh)
 }
 
-func (g *Gate) autoBan(a netip.Addr, rule HTTPRule, kernel bool) {
+func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason string, kernel bool) {
+	if d <= 0 {
+		return
+	}
 	p := netip.PrefixFrom(a, a.BitLen())
-	until := time.Now().Add(rule.BanFor)
-	e := Entry{Prefix: p, Until: until, Reason: rule.Title, Source: "rule:" + rule.ID, Added: time.Now()}
+	until := time.Now().Add(d)
+	e := Entry{Prefix: p, Until: until, Reason: reason, Source: source, Added: time.Now()}
 	if _, err := withState(func(st *State) error { st.Block = upsert(st.Block, e); return nil }); err != nil {
 		log.Printf("shield: ban %s: %v", a, err)
 		return
@@ -287,7 +304,10 @@ func (g *Gate) autoBan(a netip.Addr, rule HTTPRule, kernel bool) {
 	if kernel {
 		_ = kernelAdd(p, until)
 	}
-	log.Printf("shield: banned %s for %s (%s)", a, rule.BanFor, rule.ID)
+	log.Printf("shield: banned %s for %s (%s: %s)", a, d, source, reason)
+	if g.notify != nil {
+		g.notify(fmt.Sprintf("banned %s for %s — %s (%s)", a, d, reason, source))
+	}
 }
 
 func containsStr(xs []string, s string) bool {

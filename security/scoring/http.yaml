@@ -1,0 +1,84 @@
+# makit request scoring (makit shield). Adapted and corrected from blogcode.vn's nginx.score.json:
+#  - one explicit model: request score = sum of the signals it matches (each signal once), capped at 200;
+#    IP score = its highest request score in the window + escalation;
+#  - case-insensitive regexes on decoded values (URL-decoded up to 3 times, HTML entities, NUL removed) instead of raw
+#    case-sensitive substrings, so "%3Cscript", "%253Cscript" and "<ScRiPt" all match;
+#  - no points for ordinary traffic (status 200, POST, DELETE, ".php" on a PHP site, search words like "curl");
+#    stack-specific paths (WordPress, PHP) are in profiles you switch on/off per server;
+#  - IP addresses live in shield lists (CIDR), not in the scoring file; status codes only score in log analysis,
+#    and as bursts (many 404s), not per request;
+#  - added: XSS, SQL injection, Log4Shell, React2Shell, command injection, IP-literal Host, request rate.
+id: MK-SCORE-HTTP
+doc: docs/security/shield.md#scoring
+window: 10m                 # per-IP memory: escalation and bursts count within this window
+levels:                     # request or IP score → level
+  low: 30
+  medium: 50
+  high: 80
+  critical: 100
+actions:                    # what makit shield does at each level (log | block | ban <duration>)
+  low: log
+  medium: log
+  high: ban 1h
+  critical: ban 24h
+escalation:                 # an IP that keeps sending suspicious requests climbs a level
+  min_score: 30             # a request counts as suspicious from this score
+  every: 5                  # +add for every 5 suspicious requests in the window
+  add: 30
+profiles:                   # signals tagged with a profile only apply when it is enabled for the server
+  wordpress: false          # true on servers hosting WordPress: wp-* paths are then normal
+  php: false                # true on PHP sites: .php is then normal
+signals:
+  # --- methods
+  - { id: method-webdav, field: method, match: '^(PROPFIND|PROPPATCH|MKCOL|COPY|MOVE|LOCK|UNLOCK|SEARCH)$', score: 70, label: "WebDAV method" }
+  - { id: method-trace, field: method, match: '^(TRACE|TRACK|DEBUG)$', score: 40, label: "TRACE/DEBUG method" }
+  - { id: method-connect, field: method, match: '^CONNECT$', score: 50, label: "CONNECT (proxy abuse)" }
+  - { id: method-h2-preface, field: method, match: '^PRI$', score: 60, label: "HTTP/2 preface on HTTP/1" }
+  - { id: method-tls-on-http, field: method, match: '^\\x16\\x03', score: 60, label: "TLS handshake on the plain HTTP port" }
+  - { id: probe-rdp, field: raw, match: '(?i)mstshash=', score: 85, label: "RDP scan on the HTTP port" }
+  - { id: method-malformed, field: method, match: '^(\\x[0-9A-Fa-f]{2}|[^A-Z]|$)', score: 60, label: "malformed or empty request line" }
+  # --- secrets, admin panels, backups
+  - { id: path-dotenv, field: path, match: '(?i)/\.env(\.|$|/)', score: 90, label: ".env secret file probe" }
+  - { id: path-vcs, field: path, match: '(?i)/\.(git|svn|hg|bzr)(/|$)', score: 80, label: "source repository probe (.git)" }
+  - { id: path-cloud-keys, field: path, match: '(?i)/(\.aws/|\.ssh/|\.docker/config|id_rsa|id_ed25519|\.npmrc|\.pypirc|credentials\.json)', score: 90, label: "cloud/SSH key probe" }
+  - { id: path-config-dump, field: path, match: '(?i)/(config\.(json|ya?ml|php\.bak)|settings\.py|web\.config|\.DS_Store|phpinfo\.php|info\.php)$', score: 60, label: "config file probe" }
+  - { id: path-backup, field: path, match: '(?i)\.(sql|sql\.gz|bak|old|orig|swp|tar\.gz|zip)$', score: 50, label: "backup/dump file probe" }
+  - { id: path-db-admin, field: path, match: '(?i)/(phpmyadmin|pma|myadmin|adminer(\.php)?|dbadmin)(/|$)', score: 70, label: "database admin panel probe" }
+  - { id: path-actuator, field: path, match: '(?i)/(actuator|server-status|server-info|jmx-console|_profiler|telescope|horizon)(/|$)', score: 50, label: "framework admin endpoint probe" }
+  - { id: path-wordpress, field: path, match: '(?i)/(wp-login\.php|xmlrpc\.php|wp-admin/|wp-content/|wp-includes/)', score: 60, unless_profile: wordpress, label: "WordPress probing" }
+  - { id: path-php, field: path, match: '(?i)\.php(\?|$|/)', score: 30, unless_profile: php, label: "PHP file probe" }
+  - { id: path-asp, field: path, match: '(?i)\.(asp|aspx|jsp|cfm)(\?|$)', score: 40, label: "ASP/JSP probe" }
+  # --- device and appliance exploits
+  - { id: path-iot, field: path, match: '(?i)/(cgi-bin/|luci|boaform|HNAP1|device\.rsp|setup\.cgi|GponForm|shell\?|goform/|tmui/|remote/fgt_lang|autodiscover/|owa/|ecp/|Powershell)', score: 70, label: "device/appliance exploit probe" }
+  - { id: path-phpunit, field: path, match: '(?i)/vendor/phpunit/', score: 90, label: "PHPUnit RCE probe" }
+  # --- traversal and system paths
+  - { id: path-traversal, field: path+query, match: '(\.\./|\.\.\\|/\.\.;/)', score: 80, label: "path traversal" }
+  - { id: path-system-file, field: path+query, match: '(?i)(/etc/(passwd|shadow|hosts)|/proc/self/|c:\\windows|win\.ini|/bin/(sh|bash)\b)', score: 90, label: "system file request" }
+  # --- injection in the URL (decoded)
+  - { id: xss-script-tag, field: path+query, match: '(?i)<\s*/?\s*(script|iframe|object|embed|svg|math|base|meta|link|style)\b', score: 70, label: "XSS (script/svg tag)" }
+  - { id: xss-event-handler, field: path+query, match: '(?i)<[^>]*\bon[a-z]{3,20}\s*=', score: 70, label: "XSS (event handler)" }
+  - { id: xss-js-scheme, field: path+query, match: '(?i)\b(javascript|vbscript|livescript)\s*:', score: 60, label: "XSS (javascript: URL)" }
+  - { id: xss-data-html, field: path+query, match: '(?i)data\s*:\s*text/html', score: 60, label: "XSS (data: HTML)" }
+  - { id: xss-sinks, field: path+query, match: '(?i)(document\.(cookie|domain|write)|window\.location|\balert\s*\(|\bprompt\s*\(|\bconfirm\s*\(|String\.fromCharCode|\beval\s*\()', score: 50, label: "XSS (DOM sink)" }
+  - { id: sqli-union, field: query, match: '(?i)\bunion\b[\s/*]+(all[\s/*]+)?select\b', score: 80, label: "SQL injection (UNION)" }
+  - { id: sqli-boolean, field: query, match: '(?i)(''|")\s*\)?\s*(or|and)\s+(''|")?[\w-]*(''|")?\s*(=|like|<>|!=)\s*(''|")?[\w-]*|\b(or|and)\s+\d+\s*=\s*\d+\s*(--|#|/\*)', score: 70, label: "SQL injection (boolean)" }
+  - { id: sqli-functions, field: query, match: '(?i)\b(sleep|benchmark|pg_sleep|waitfor\s+delay|extractvalue|updatexml|information_schema|load_file|into\s+outfile)\b', score: 70, label: "SQL injection (time/file functions)" }
+  - { id: log4shell, field: any, match: '(?i)\$\{\s*(jndi|\$\{lower|env|sys|::-j)', score: 100, label: "Log4Shell" }
+  - { id: cmd-injection, field: query, match: '(;|\||&&|\$\(|`)\s*(wget|curl|nc|ncat|bash|sh|python[0-9]?|perl|chmod|nohup|busybox)\b', score: 80, label: "command injection" }
+  - { id: cmd-download-run, field: query, match: '(?i)\b(wget|curl)\s+(-[a-z]+\s+)*https?://\S+.*\b(chmod|sh|bash|nohup)\b', score: 90, label: "download-and-run payload" }
+  - { id: php-wrapper, field: query, match: '(?i)\b(php|phar|expect|zip|data)://', score: 60, label: "PHP stream wrapper" }
+  - { id: xdebug, field: query, match: '(?i)XDEBUG_SESSION', score: 70, label: "Xdebug trigger" }
+  # --- clients
+  - { id: ua-empty, field: ua, match: '^(-)?$', score: 25, label: "empty user agent" }                     # health checks and some APIs send none
+  - { id: ua-script, field: ua, match: '(?i)^(curl|wget|python-requests|python-urllib|aiohttp|go-http-client|java/|okhttp|libwww-perl|scrapy)', score: 15, label: "script client" }
+  - { id: ua-scanner, field: ua, match: '(?i)(sqlmap|nikto|nuclei|masscan|zgrab|nmap|gobuster|dirbuster|feroxbuster|wpscan|acunetix|netsparker|assetnote|onlyscans)', score: 100, label: "vulnerability scanner" }
+  - { id: ua-research-scanner, field: ua, match: '(?i)(censysinspect|censys|expanse|internet-measurement|keydrop|spark commit|hello world)', score: 50, label: "internet-wide scanner" }
+  - { id: ua-typo, field: ua, match: '(?i)mozila/', score: 70, label: "forged browser string" }                 # "Mozila" — forged browser string
+  # --- request shape
+  - { id: host-ip-literal, field: host, match: '^\[?[0-9a-f:.]+\]?(:\d+)?$', score: 30, label: "request to the bare IP" }   # scanners hit the IP, not your domain
+  - { id: r2s-server-action, field: header:next-action, match: '.+', score: 50, also: { field: ua, match: '(?i)^(python|curl|go-http|aiohttp|okhttp|wget)' }, label: "scripted Next.js Server Action (React2Shell)" }
+  # --- log analysis only (needs the response status)
+  - { id: status-probe, field: status, match: '^(400|403|404|405|444|499)$', score: 5, label: "error response" }
+bursts:                     # per-IP counters within the window
+  - { id: burst-4xx, field: status, match: '^4', count: 30, score: 40, label: "many error responses (path guessing)" }      # many errors = guessing paths
+  - { id: burst-rate, count: 600, score: 40, label: "request flood" }                                # more than 600 requests in the window

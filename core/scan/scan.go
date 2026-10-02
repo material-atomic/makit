@@ -217,5 +217,6 @@ func CatalogDirs() []string {
 			dirs = append(dirs, filepath.Join(filepath.Dir(real), "..", "security"))
 		}
 	}
-	return append(dirs, "/var/lib/makit/security")
+	// 1. bundled with this makit · 2. updated copy (makit rules update) · 3. your own (/etc/makit/security), wins.
+	return append(dirs, "/var/lib/makit/security", "/etc/makit/security")
 }

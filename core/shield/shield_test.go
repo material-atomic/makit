@@ -58,7 +58,9 @@ func policy(t *testing.T) *Policy {
 func TestDecide(t *testing.T) {
 	p := policy(t)
 	var banned []string
-	p.Ban = func(a netip.Addr, r HTTPRule) { banned = append(banned, a.String()+" "+r.ID) }
+	p.Ban = func(a netip.Addr, d time.Duration, src, why string) {
+		banned = append(banned, a.String()+" "+strings.TrimPrefix(src, "rule:"))
+	}
 	cases := []struct {
 		name            string
 		r               Request

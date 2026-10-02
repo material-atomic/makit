@@ -1,6 +1,7 @@
 package shield
 
 import (
+	"fmt"
 	"net/netip"
 	"strings"
 	"time"
@@ -18,17 +19,21 @@ type Request struct {
 	Country  string            // CF-IPCountry
 	Ray      string            // CF-Ray
 	Headers  map[string]string // lower-cased request headers (for rules)
+	Raw      string            // original request line when known (log analysis)
 	Received time.Time
 }
 
 type Decision struct {
-	Client  string `json:"client"`
-	Peer    string `json:"peer"`
-	Via     string `json:"via,omitempty"` // trusted proxy that supplied the client IP
-	Allow   bool   `json:"allow"`
-	Verdict string `json:"verdict"` // allowed, allowlisted, blocked, would-block (observe), invalid
-	Rule    string `json:"rule,omitempty"`
-	Reason  string `json:"reason,omitempty"`
+	Client  string   `json:"client"`
+	Peer    string   `json:"peer"`
+	Via     string   `json:"via,omitempty"` // trusted proxy that supplied the client IP
+	Allow   bool     `json:"allow"`
+	Verdict string   `json:"verdict"` // allowed, allowlisted, blocked, would-block (observe), invalid
+	Rule    string   `json:"rule,omitempty"`
+	Reason  string   `json:"reason,omitempty"`
+	Score   int      `json:"score,omitempty"`   // request score; IP score when higher
+	Level   string   `json:"level,omitempty"`   // normal, low, medium, high, critical
+	Signals []string `json:"signals,omitempty"` // matched scoring signals
 }
 
 // Policy holds everything a decision needs.
@@ -40,7 +45,9 @@ type Policy struct {
 	Block   *Set // manual and automatic bans (state.json)
 	Lists   *Set // bulk lists (lists/*.txt), may hold millions
 	Rules   []HTTPRule
-	Ban     func(addr netip.Addr, rule HTTPRule) // auto-ban hook for rules with ban_for
+	Scoring *Scoring
+	Tracker *Tracker
+	Ban     func(addr netip.Addr, d time.Duration, source, reason string) // automatic bans (rules, scores)
 }
 
 func (p *Policy) trusted(a netip.Addr) bool {
@@ -109,9 +116,27 @@ func (p *Policy) Decide(r Request) Decision {
 	for _, rule := range p.Rules {
 		if rule.Match(r) {
 			if rule.BanFor > 0 && p.Ban != nil && !p.Observe {
-				p.Ban(client, rule)
+				p.Ban(client, rule.BanFor, "rule:"+rule.ID, rule.Title)
 			}
 			return block("rule:"+rule.ID, rule.Title)
+		}
+	}
+	if p.Scoring != nil {
+		score, hits := p.Scoring.ScoreRequest(r, 0)
+		if p.Tracker != nil {
+			ipScore, bursts := p.Tracker.Observe(client, score, hits, 0, now)
+			hits = append(hits, bursts...)
+			score = max(score, ipScore)
+		}
+		d.Score, d.Level, d.Signals = score, p.Scoring.Level(score), hits
+		switch act, dur := p.Scoring.Action(d.Level); act {
+		case "block":
+			return block("score:"+d.Level, fmt.Sprintf("score %d", score))
+		case "ban":
+			if p.Ban != nil && !p.Observe {
+				p.Ban(client, dur, "score:"+d.Level, fmt.Sprintf("score %d: %s", score, strings.Join(hits, " ")))
+			}
+			return block("score:"+d.Level, fmt.Sprintf("score %d", score))
 		}
 	}
 	return d

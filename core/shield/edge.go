@@ -26,7 +26,7 @@ type Gate struct {
 	ask    atomic.Bool // /check enforces; off = always allow
 	rec    *Recorder
 	header string
-	onBan  func(netip.Addr, HTTPRule)
+	notify func(text string) // set when notifications are configured
 
 	mu    sync.Mutex
 	stats map[string]int64 // verdict → count since start
