@@ -16,6 +16,12 @@ client_ip_header: CF-Connecting-IP
 allow: []                    # never blocked, e.g. [203.0.113.0/24, 198.51.100.7]
 rules: true                  # HTTP rules from the catalog (security/http/*.yaml), with automatic bans
 kernel_block: false          # also drop blocked IPs in the kernel (nftables) — for ports makit does not see, or floods
+scoring:                     # request scoring (security/scoring/http.yaml) — makit docs shield
+  profiles: { wordpress: false, php: false }   # true when this server runs them: their paths are not suspicious
+  # actions: { high: "ban 1h", critical: "ban 24h" }
+  # file: /etc/makit/my-scoring.yaml           # or: makit shield customize scoring
+bots:                        # known bots, crawlers, AI agents — makit shield bots · makit docs bots
+  policy: {}                 # e.g. { ai-crawler: block, gptbot: "limit 30/1m", seo: "ban 24h" }
 snapshot:
   path: /var/log/makit/shield/requests.jsonl
   max_mb: 50

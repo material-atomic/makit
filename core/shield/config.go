@@ -55,6 +55,7 @@ type Config struct {
 		ScoringOverrides `yaml:",inline"`
 		File             string `yaml:"file"` // your own scoring file instead of the catalog's (same format)
 	} `yaml:"scoring"`
+	Bots BotsConfig `yaml:"bots"` // known bots / AI agents policy and the bot score
 }
 
 func LoadConfig(path string) (*Config, error) {

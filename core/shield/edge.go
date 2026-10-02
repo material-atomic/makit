@@ -98,6 +98,7 @@ func (w *statusWriter) Flush() {
 }
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+const limitedPage = "<!doctype html><title>429 Too Many Requests</title><p>Too many requests. Try again later.</p>\n"
 const blockedPage = "<!doctype html><title>403 Forbidden</title><p>Forbidden.</p>\n"
 
 // httpHandler decides on every request, then forwards it to the upstream with the real client IP.
@@ -142,6 +143,14 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 		if !d.Allow {
 			snap.Status = http.StatusForbidden
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if d.Status == http.StatusTooManyRequests {
+				snap.Status = d.Status
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(d.Status)
+				_, _ = io.WriteString(w, limitedPage)
+				g.rec.Write(snap)
+				return
+			}
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, blockedPage)
 			g.rec.Write(snap)

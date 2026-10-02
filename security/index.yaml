@@ -1,7 +1,9 @@
 # makit security catalog. makit reads every source in order (later ones override entries with the same id):
 #   1. this directory, bundled with the installed makit version
 #   2. /var/lib/makit/security — the latest catalog from the makit repo (`makit rules update`)
-#   3. directories given with `makit scan --rules DIR`
+#   3. /etc/makit/security — your own copies and additions (`makit shield customize scoring|bots|rules`), never
+#      overwritten by updates
+#   4. directories given with `makit scan --rules DIR`
 schema: 1            # bump only on breaking format changes; makit refuses catalogs with a newer schema
 name: makit
 source: https://github.com/material-atomic/makit/tree/main/security

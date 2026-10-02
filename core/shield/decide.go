@@ -34,6 +34,8 @@ type Decision struct {
 	Score   int      `json:"score,omitempty"`   // request score; IP score when higher
 	Level   string   `json:"level,omitempty"`   // normal, low, medium, high, critical
 	Signals []string `json:"signals,omitempty"` // matched scoring signals
+	Bot     *Bot     `json:"bot,omitempty"`     // known bot, or the bot score of an undeclared client
+	Status  int      `json:"status,omitempty"`  // HTTP status for a denial when not 403 (429 for limits)
 }
 
 // Policy holds everything a decision needs.
@@ -48,6 +50,12 @@ type Policy struct {
 	Scoring *Scoring
 	Tracker *Tracker
 	Ban     func(addr netip.Addr, d time.Duration, source, reason string) // automatic bans (rules, scores)
+
+	Bots       *BotCatalog // known bots and the maintainer's policy for them
+	BotScore   *Scoring    // bot score for undeclared clients
+	BotTracker *Tracker
+	Verifier   *Verifier
+	Limiter    *Limiter
 }
 
 func (p *Policy) trusted(a netip.Addr) bool {
@@ -69,7 +77,8 @@ func firstIP(v string) (netip.Addr, bool) {
 	return a.Unmap(), err == nil
 }
 
-// Decide applies, in order: client IP resolution (header only from trusted proxies) → allowlist → blocklist → rules.
+// Decide applies, in order: client IP resolution (header only from trusted proxies) → allowlist → blocklist → known
+// bots (verified + allow skips the rest) → HTTP rules → attack score → bot score for undeclared clients.
 func (p *Policy) Decide(r Request) Decision {
 	peer, ok := firstIP(r.Peer)
 	if !ok {
@@ -102,6 +111,30 @@ func (p *Policy) Decide(r Request) Decision {
 		d.Allow, d.Verdict = false, "blocked"
 		return d
 	}
+	// apply enforces a policy action; it reports whether the request is denied.
+	apply := func(act Act, rule, reason, limitKey string) (Decision, bool) {
+		switch act.Kind {
+		case "block":
+			return block(rule, reason), true
+		case "ban":
+			if p.Ban != nil && !p.Observe {
+				p.Ban(client, act.Dur, rule, reason)
+			}
+			return block(rule, reason), true
+		case "limit":
+			if p.Limiter == nil || p.Limiter.Allow(limitKey, act, now) {
+				return d, false
+			}
+			d.Rule, d.Reason = rule, fmt.Sprintf("over %s", act)
+			if p.Observe {
+				d.Verdict = "would-limit"
+				return d, true
+			}
+			d.Allow, d.Verdict, d.Status = false, "limited", 429
+			return d, true
+		}
+		return d, false
+	}
 	// The peer itself (a direct client, or a proxy you banned) is checked too.
 	for _, a := range []netip.Addr{client, peer} {
 		if e, ok := p.Block.Match(a, now); ok {
@@ -110,6 +143,31 @@ func (p *Policy) Decide(r Request) Decision {
 		if p.Lists != nil {
 			if e, ok := p.Lists.Match(a, now); ok {
 				return block(e.Source, e.Prefix.String()+" "+e.Reason)
+			}
+		}
+	}
+	if p.Bots != nil {
+		if a := p.Bots.Identify(r); a != nil {
+			st := "claimed"
+			if a.Verifiable() {
+				st = "unknown"
+				if p.Verifier != nil {
+					st = p.Verifier.Check(a, client, now)
+				}
+			}
+			act, rule, key := p.Bots.PolicyFor(a), "bot:"+a.ID, "agent:"+a.ID
+			if st == "spoofed" {
+				act, _ = p.Bots.Policy("spoofed")
+				rule, key = "bot:spoofed", "spoofed:"+client.String()
+			}
+			d.Bot = &Bot{ID: a.ID, Name: a.Name, Category: a.Category, Status: st, Action: act.String()}
+			if st == "verified" && act.Kind == "allow" {
+				d.Verdict = "bot-verified" // the real crawler: no rules, no scores (it follows any link it finds)
+				return d
+			}
+			reason := fmt.Sprintf("%s (%s, %s)", a.Name, a.Category, st)
+			if res, done := apply(act, rule, reason, key); done {
+				return res
 			}
 		}
 	}
@@ -129,14 +187,25 @@ func (p *Policy) Decide(r Request) Decision {
 			score = max(score, ipScore)
 		}
 		d.Score, d.Level, d.Signals = score, p.Scoring.Level(score), hits
-		switch act, dur := p.Scoring.Action(d.Level); act {
-		case "block":
-			return block("score:"+d.Level, fmt.Sprintf("score %d", score))
-		case "ban":
-			if p.Ban != nil && !p.Observe {
-				p.Ban(client, dur, "score:"+d.Level, fmt.Sprintf("score %d: %s", score, strings.Join(hits, " ")))
+		if d.Level != "normal" {
+			if res, done := apply(p.Scoring.Act(d.Level), "score:"+d.Level, fmt.Sprintf("score %d: %s", score, strings.Join(hits, " ")), "score:"+client.String()); done {
+				return res
 			}
-			return block("score:"+d.Level, fmt.Sprintf("score %d", score))
+		}
+	}
+	if p.BotScore != nil && d.Bot == nil {
+		score, hits := p.BotScore.ScoreRequest(r, 0)
+		if p.BotTracker != nil {
+			ipScore, bursts := p.BotTracker.Observe(client, score, hits, 0, now)
+			hits = append(hits, bursts...)
+			score = max(score, ipScore)
+		}
+		if lvl := p.BotScore.Level(score); lvl != "normal" {
+			act := p.BotScore.Act(lvl)
+			d.Bot = &Bot{Status: "undeclared", Score: score, Level: lvl, Action: act.String(), Signals: hits}
+			if res, done := apply(act, "bot-score:"+lvl, fmt.Sprintf("bot score %d: %s", score, strings.Join(hits, " ")), "botscore:"+client.String()); done {
+				return res
+			}
 		}
 	}
 	return d

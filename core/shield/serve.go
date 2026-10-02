@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,6 +46,16 @@ func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error
 	if cfg.Scoring.Enabled == nil || *cfg.Scoring.Enabled {
 		if p.Scoring, err = LoadScoring(dirs, cfg.Scoring.File, cfg.Scoring.ScoringOverrides); err != nil {
 			return nil, nil, err
+		}
+	}
+	if b := cfg.Bots; b.Enabled == nil || *b.Enabled {
+		if p.Bots, err = LoadBots(dirs, b.File, b.Policy); err != nil {
+			return nil, nil, err
+		}
+		if b.Score.Enabled == nil || *b.Score.Enabled {
+			if p.BotScore, err = LoadScoringSet(dirs, "bots.yaml", b.ScoreFile, b.Score); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	return p, st, nil
@@ -87,9 +98,15 @@ func (g *Gate) checkHandler() http.Handler {
 		w.Header().Set("X-Makit-Client", d.Client)
 		w.Header().Set("X-Makit-Verdict", d.Verdict)
 		if !d.Allow {
-			snap.Status = http.StatusForbidden
+			// nginx auth_request only passes 401/403 through (anything else becomes 500): its snippet asks ?deny=403.
+			code := http.StatusForbidden
+			if d.Status == http.StatusTooManyRequests && r.URL.Query().Get("deny") != "403" {
+				code = http.StatusTooManyRequests
+				w.Header().Set("Retry-After", "60")
+			}
+			snap.Status = code
 			g.rec.Write(snap)
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.Error(w, http.StatusText(code), code)
 			return
 		}
 		snap.Status = http.StatusOK
@@ -153,7 +170,8 @@ func Serve(cfgPath string, dirs []string) error {
 	}
 	// Bulk lists are re-read only when their files change; bans and config reloads reuse them. The score tracker
 	// survives reloads so per-IP history is not lost.
-	var tracker *Tracker
+	var tracker, botTracker *Tracker
+	verifier, limiter := NewVerifier(), NewLimiter()
 	var lists *Set
 	var listsFP string
 	kernelWasOn := false
@@ -182,6 +200,20 @@ func Serve(cfgPath string, dirs []string) error {
 			tracker.sc = p.Scoring
 			p.Tracker = tracker
 		}
+		if p.BotScore != nil {
+			if botTracker == nil || botTracker.sc.Window != p.BotScore.Window {
+				botTracker = NewTracker(p.BotScore, 200000)
+			}
+			botTracker.sc = p.BotScore
+			p.BotTracker = botTracker
+		}
+		if p.Bots != nil {
+			verifier.LoadRanges(p.Bots)
+			if c.Bots.Verify == nil || *c.Bots.Verify {
+				p.Verifier = verifier
+			}
+		}
+		p.Limiter = limiter
 		cfg = c
 		g.header = c.ClientHeader
 		g.policy.Store(p)
@@ -239,6 +271,7 @@ func Serve(cfgPath string, dirs []string) error {
 			lastCfg = st.ModTime()
 		}
 		tick, daily := time.NewTicker(2*time.Second), time.NewTicker(24*time.Hour)
+		catFP := catalogFingerprint(dirs)
 		for {
 			select {
 			case <-ctx.Done():
@@ -258,18 +291,31 @@ func Serve(cfgPath string, dirs []string) error {
 				if listsFingerprint() != listsFP {
 					changed = true
 				}
+				if fp := catalogFingerprint(dirs); fp != catFP {
+					catFP, changed = fp, true // a customized scoring/bots/rules file was edited
+				}
 				if changed {
 					if err := load(); err != nil {
 						log.Printf("shield: reload: %v (kept the previous policy)", err)
 					}
 				}
 			case <-daily.C:
-				if _, err := UpdateCloudflare(); err == nil {
-					_ = load()
+				_, _ = UpdateCloudflare()
+				if p := g.policy.Load(); p.Bots != nil {
+					_, _ = UpdateBotRanges(p.Bots)
 				}
+				_ = load()
 			}
 		}
 	}()
+	if p := g.policy.Load(); p.Bots != nil {
+		go func() { // first start: fetch the published crawler ranges once if they are missing
+			if _, err := os.Stat(botsDir()); os.IsNotExist(err) {
+				UpdateBotRanges(p.Bots)
+				_ = load()
+			}
+		}()
+	}
 	if containsStr(cfg.TrustedProxies, "cloudflare") {
 		go func() {
 			if _, err := UpdateCloudflare(); err == nil {
@@ -317,4 +363,20 @@ func containsStr(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// catalogFingerprint changes when any scoring, bots or HTTP rule file in the catalog directories changes.
+func catalogFingerprint(dirs []string) string {
+	var b strings.Builder
+	for _, d := range dirs {
+		for _, sub := range []string{"scoring", "bots", "http"} {
+			ents, _ := os.ReadDir(filepath.Join(d, sub))
+			for _, e := range ents {
+				if info, err := e.Info(); err == nil {
+					fmt.Fprintf(&b, "%s/%s/%s:%d:%d;", d, sub, e.Name(), info.Size(), info.ModTime().UnixNano())
+				}
+			}
+		}
+	}
+	return b.String()
 }

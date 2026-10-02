@@ -1,0 +1,39 @@
+# Bot score: how likely an UNDECLARED client (no known bot User-Agent, see security/bots/agents.yaml) is automated.
+# Same format as http.yaml. Header signals only apply when headers are known (ask/edge mode); log analysis skips them.
+# Browsers send Accept-Language, Accept, Accept-Encoding; Chromium sends sec-ch-ua and sec-fetch-* over HTTPS.
+# Actions per level (shield.yaml → bots.score.actions): log | block | ban <duration> | limit <N>/<window> (per IP).
+# Guide: docs/security/bots.md#bot-score
+id: MK-SCORE-BOTS
+doc: docs/security/bots.md#bot-score
+window: 5m
+level_order: [suspect, likely, bot]
+levels:
+  suspect: 30
+  likely: 50
+  bot: 80
+actions:
+  suspect: log
+  likely: log
+  bot: log
+
+signals:
+  - {id: ua-empty, label: "no User-Agent", field: ua, match: '^\s*$', score: 60}
+  - {id: ua-not-browser, label: "User-Agent is not a browser", field: ua, match: '^[^M]|^M[^o]', score: 30}
+  - {id: ua-old-chrome, label: "Chrome older than 100", field: ua, match: 'Chrome/[1-9]?\d\.', score: 25}
+  - {id: ua-msie, label: "Internet Explorer", field: ua, match: 'MSIE \d|Trident/', score: 30}
+  - {id: ua-automation, label: "automation marker in User-Agent", field: ua, match: '(?i)selenium|webdriver|puppeteer|playwright|headless', score: 70}
+  - {id: hint-headless, label: "HeadlessChrome in client hints", field: 'header:sec-ch-ua', match: 'HeadlessChrome', score: 70}
+  - {id: no-accept-language, label: "no Accept-Language", field: 'header:accept-language', match: '^$', score: 25}
+  - {id: no-accept, label: "no Accept", field: 'header:accept', match: '^$', score: 20}
+  - {id: no-accept-encoding, label: "no Accept-Encoding", field: 'header:accept-encoding', match: '^$', score: 15}
+  - {id: chrome-no-client-hints, label: "Chrome without sec-ch-ua (HTTPS only)", field: ua, match: 'Chrome/\d', score: 20,
+     also: {field: 'header:sec-ch-ua', match: '^$'}}
+  - {id: browser-no-sec-fetch, label: "browser without sec-fetch-mode (HTTPS only)", field: ua, match: '^Mozilla/', score: 10,
+     also: {field: 'header:sec-fetch-mode', match: '^$'}}
+  - {id: webdriver-header, label: "webdriver header", field: any, match: '(?i)\bwebdriver\b', score: 40}
+  - {id: robots-txt, label: "fetched robots.txt", field: path, match: '^/robots\.txt$', score: 15}
+  - {id: sitemap, label: "fetched a sitemap", field: path, match: '(?i)^/sitemap[\w-]*\.xml', score: 10}
+
+bursts:
+  - {id: burst-rate, label: "many requests in the window", count: 300, score: 40}
+  - {id: burst-404, label: "many 404s (crawling dead links)", field: status, match: '^404$', count: 40, score: 30}

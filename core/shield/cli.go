@@ -32,6 +32,9 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
   cloudflare-update             refresh Cloudflare's IP ranges now
   set mode block|observe|pass · set ask on|off · set edge on|off
                                 change a switch in the config (the running gate reloads within 2 s)
+  bots …                        known bots, crawlers and AI agents: policy per category or agent (makit shield bots help)
+  customize scoring|bots|rules [--to /etc/makit/security]
+                                copy catalog files to edit locally; your copies override the bundled ones
   snippet caddy|nginx [--addr 127.0.0.1:9180]
                                 configuration that makes Caddy/nginx ask makit before every request
 `
@@ -85,6 +88,10 @@ func Main(args []string, dirs []string) int {
 		} else if err = SetConfig(cfgPath, rest[0], rest[1]); err == nil {
 			fmt.Printf("%s = %s\n", rest[0], rest[1])
 		}
+	case "bots":
+		err = cmdBots(cfgPath, dirs, rest)
+	case "customize":
+		err = cmdCustomize(dirs, rest)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -246,6 +253,8 @@ func cmdCheck(cfgPath string, dirs []string, args []string) error {
 	uri := fs.String("uri", "/", "request URI")
 	method := fs.String("method", "GET", "method")
 	ua := fs.String("ua", "", "user agent")
+	var hdr multi
+	fs.Var(&hdr, "header", "request header k=v (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -257,7 +266,20 @@ func cmdCheck(cfgPath string, dirs []string, args []string) error {
 	if err != nil {
 		return err
 	}
-	d := p.Decide(Request{Peer: *peer, Client: *client, Method: *method, URI: *uri, UA: *ua, Headers: map[string]string{}, Received: time.Now()})
+	if p.Bots != nil {
+		p.Verifier = NewVerifier()
+		p.Verifier.Sync = true // a one-off check can wait for DNS
+		p.Verifier.LoadRanges(p.Bots)
+	}
+	var hdrs map[string]string // nil: header-based bot signals are skipped unless headers are given
+	for _, h := range hdr {
+		k, v, _ := strings.Cut(h, "=")
+		if hdrs == nil {
+			hdrs = map[string]string{}
+		}
+		hdrs[strings.ToLower(k)] = v
+	}
+	d := p.Decide(Request{Peer: *peer, Client: *client, Method: *method, URI: *uri, UA: *ua, Headers: hdrs, Received: time.Now()})
 	b, _ := json.MarshalIndent(d, "", "  ")
 	fmt.Println(string(b))
 	return nil
@@ -344,7 +366,7 @@ example.com {
 		fmt.Printf(`# nginx — in each server {} that should be protected.
 location = /_makit_shield {
     internal;
-    proxy_pass http://%s/check;
+    proxy_pass http://%s/check?deny=403;   # nginx only passes 401/403 through
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
     proxy_set_header X-Makit-Peer $remote_addr;           # do not use real_ip_header together with this

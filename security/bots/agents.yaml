@@ -1,0 +1,156 @@
+# Known bots, crawlers and AI agents. makit recognises them by User-Agent (or a header), verifies the ones that can be
+# verified, and applies the maintainer's policy per category or per agent (shield.yaml → bots.policy).
+#
+# verify:
+#   rdns:   reverse DNS of the IP must end in one of these domains AND resolve forward to the same IP
+#   ranges: the operator's published IP ranges (JSON with prefixes, or plain CIDR lines), cached daily
+#           by `makit shield bots update` into /var/lib/makit/shield/bots/<id>.txt
+# A claimed identity that fails verification is "spoofed" (policy key: spoofed).
+# Agents without verify are "claimed": anyone can send that User-Agent, so allow never skips scoring for them.
+#
+# Actions: allow | log | block | ban <duration> | limit <N>/<window>  (e.g. limit 60/1m, per agent across all IPs)
+# Guide: docs/security/bots.md
+schema: 1
+id: MK-BOTS
+doc: docs/security/bots.md
+
+categories:
+  search:       {label: "Search engine crawler", action: allow}
+  ai-search:    {label: "AI search index (answers cite your pages)", action: allow}
+  ai-assistant: {label: "AI assistant fetching a page a user asked for", action: allow}
+  ai-crawler:   {label: "AI training crawler", action: log}
+  ai-agent:     {label: "AI agent browsing on a user's behalf", action: log}
+  seo:          {label: "SEO / marketing crawler", action: log}
+  social:       {label: "Link preview (chat apps, social networks)", action: allow}
+  monitoring:   {label: "Uptime monitor", action: allow}
+  feed:         {label: "Feed reader", action: allow}
+  archive:      {label: "Web archive", action: log}
+  library:      {label: "HTTP library or command-line tool", action: log}
+  headless:     {label: "Headless browser", action: log}
+  other-bot:    {label: "Other self-declared bot", action: log}
+spoofed: block   # pretends to be a verifiable bot (fake Googlebot…)
+
+# robots.txt-only tokens: they never appear in a User-Agent, but `makit shield bots robots` lists them for the category.
+robots_tokens:
+  ai-crawler: [Google-Extended, Applebot-Extended]
+
+agents:
+  # ── search ──
+  - {id: googlebot, name: Googlebot, operator: Google, category: search, robots: Googlebot,
+     ua: 'Googlebot|Google-InspectionTool|GoogleOther|Storebot-Google|AdsBot-Google|Mediapartners-Google',
+     verify: {rdns: [googlebot.com, google.com, googleusercontent.com],
+              ranges: ['https://developers.google.com/static/search/apis/ipranges/googlebot.json',
+                       'https://developers.google.com/static/search/apis/ipranges/special-crawlers.json']},
+     url: https://developers.google.com/search/docs/crawling-indexing/overview-google-crawlers}
+  - {id: bingbot, name: Bingbot, operator: Microsoft, category: search, robots: bingbot,
+     ua: 'bingbot|BingPreview|msnbot', verify: {rdns: [search.msn.com], ranges: ['https://www.bing.com/toolbox/bingbot.json']},
+     url: https://www.bing.com/webmasters/help/which-crawlers-does-bing-use-8c184ec0}
+  - {id: applebot, name: Applebot, operator: Apple, category: search, robots: Applebot, ua: 'Applebot',
+     verify: {rdns: [applebot.apple.com], ranges: ['https://search.developer.apple.com/applebot.json']},
+     url: https://support.apple.com/en-us/119829}
+  - {id: duckduckbot, name: DuckDuckBot, operator: DuckDuckGo, category: search, robots: DuckDuckBot, ua: 'DuckDuckBot',
+     verify: {ranges: ['https://duckduckgo.com/duckduckbot.json']}}
+  - {id: yandexbot, name: YandexBot, operator: Yandex, category: search, robots: Yandex,
+     ua: 'YandexBot|YandexImages|YandexMobileBot|YandexVideo|YandexNews|YandexMetrika|YandexWebmaster',
+     verify: {rdns: [yandex.ru, yandex.net, yandex.com]}}
+  - {id: baiduspider, name: Baiduspider, operator: Baidu, category: search, robots: Baiduspider, ua: 'Baiduspider',
+     verify: {rdns: [baidu.com, baidu.jp]}}
+  - {id: coccocbot, name: coccocbot, operator: Cốc Cốc, category: search, robots: coccocbot, ua: 'coccocbot'}
+  - {id: seznambot, name: SeznamBot, operator: Seznam, category: search, robots: SeznamBot, ua: 'SeznamBot'}
+  - {id: naver-yeti, name: Yeti, operator: Naver, category: search, robots: Yeti, ua: 'Yeti/'}
+  - {id: petalbot, name: PetalBot, operator: Huawei, category: search, robots: PetalBot, ua: 'PetalBot'}
+
+  # ── AI search indexes ──
+  - {id: oai-searchbot, name: OAI-SearchBot, operator: OpenAI, category: ai-search, robots: OAI-SearchBot, ua: 'OAI-SearchBot',
+     verify: {ranges: ['https://openai.com/searchbot.json']}, url: https://platform.openai.com/docs/bots}
+  - {id: claude-searchbot, name: Claude-SearchBot, operator: Anthropic, category: ai-search, robots: Claude-SearchBot, ua: 'Claude-SearchBot'}
+  - {id: perplexitybot, name: PerplexityBot, operator: Perplexity, category: ai-search, robots: PerplexityBot, ua: 'PerplexityBot',
+     verify: {ranges: ['https://www.perplexity.com/perplexitybot.json']}, url: https://docs.perplexity.ai/guides/bots}
+
+  # ── AI assistants fetching for a user ──
+  - {id: chatgpt-user, name: ChatGPT-User, operator: OpenAI, category: ai-assistant, robots: ChatGPT-User, ua: 'ChatGPT-User',
+     verify: {ranges: ['https://openai.com/chatgpt-user.json']}, url: https://platform.openai.com/docs/bots}
+  - {id: claude-user, name: Claude-User, operator: Anthropic, category: ai-assistant, robots: Claude-User, ua: 'Claude-User'}
+  - {id: perplexity-user, name: Perplexity-User, operator: Perplexity, category: ai-assistant, robots: Perplexity-User, ua: 'Perplexity-User',
+     verify: {ranges: ['https://www.perplexity.com/perplexity-user.json']}}
+  - {id: mistralai-user, name: MistralAI-User, operator: Mistral AI, category: ai-assistant, robots: MistralAI-User, ua: 'MistralAI-User'}
+  - {id: duckassistbot, name: DuckAssistBot, operator: DuckDuckGo, category: ai-assistant, robots: DuckAssistBot, ua: 'DuckAssistBot'}
+  - {id: google-fetchers, name: Google user-triggered fetcher, operator: Google, category: ai-assistant,
+     ua: 'Google-Read-Aloud|FeedFetcher-Google|Google-Site-Verification|Google-NotebookLM',
+     verify: {ranges: ['https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers.json']}}
+  - {id: meta-externalfetcher, name: meta-externalfetcher, operator: Meta, category: ai-assistant, robots: meta-externalfetcher, ua: 'meta-externalfetcher'}
+
+  # ── AI training crawlers ──
+  - {id: gptbot, name: GPTBot, operator: OpenAI, category: ai-crawler, robots: GPTBot, ua: 'GPTBot',
+     verify: {ranges: ['https://openai.com/gptbot.json']}, url: https://platform.openai.com/docs/bots}
+  - {id: claudebot, name: ClaudeBot, operator: Anthropic, category: ai-crawler, robots: ClaudeBot, ua: 'ClaudeBot|anthropic-ai|Claude-Web'}
+  - {id: ccbot, name: CCBot, operator: Common Crawl, category: ai-crawler, robots: CCBot, ua: 'CCBot',
+     verify: {ranges: ['https://index.commoncrawl.org/ccbot.json']}}
+  - {id: bytespider, name: Bytespider, operator: ByteDance, category: ai-crawler, robots: Bytespider, ua: 'Bytespider'}
+  - {id: amazonbot, name: Amazonbot, operator: Amazon, category: ai-crawler, robots: Amazonbot, ua: 'Amazonbot',
+     verify: {rdns: [crawl.amazonbot.amazon]}}
+  - {id: meta-externalagent, name: meta-externalagent, operator: Meta, category: ai-crawler, robots: meta-externalagent, ua: 'meta-externalagent|FacebookBot'}
+  - {id: cohere, name: cohere-ai, operator: Cohere, category: ai-crawler, robots: cohere-ai, ua: 'cohere-ai|cohere-training-data-crawler'}
+  - {id: diffbot, name: Diffbot, operator: Diffbot, category: ai-crawler, robots: Diffbot, ua: 'Diffbot'}
+  - {id: ai2bot, name: AI2Bot, operator: Allen Institute for AI, category: ai-crawler, robots: AI2Bot, ua: 'AI2Bot|Ai2Bot-Dolma'}
+  - {id: timpibot, name: Timpibot, operator: Timpi, category: ai-crawler, robots: Timpibot, ua: 'Timpibot'}
+  - {id: imagesiftbot, name: ImagesiftBot, operator: Hive, category: ai-crawler, robots: ImagesiftBot, ua: 'ImagesiftBot'}
+  - {id: omgili, name: omgili, operator: Webz.io, category: ai-crawler, robots: omgili, ua: 'omgili'}
+
+  # ── AI agents (a real browser driven by an AI). They sign requests (Web Bot Auth) or use a browser User-Agent. ──
+  - {id: chatgpt-agent, name: ChatGPT agent, operator: OpenAI, category: ai-agent, header: {signature-agent: 'chatgpt\.com'}}
+  - {id: signed-agent, name: Signed agent (Web Bot Auth), category: ai-agent, header: {signature-agent: '.'}}
+
+  # ── SEO ──
+  - {id: ahrefsbot, name: AhrefsBot, operator: Ahrefs, category: seo, robots: AhrefsBot, ua: 'AhrefsBot|AhrefsSiteAudit'}
+  - {id: semrushbot, name: SemrushBot, operator: Semrush, category: seo, robots: SemrushBot, ua: 'SemrushBot|SiteAuditBot'}
+  - {id: mj12bot, name: MJ12bot, operator: Majestic, category: seo, robots: MJ12bot, ua: 'MJ12bot'}
+  - {id: dotbot, name: DotBot, operator: Moz, category: seo, robots: dotbot, ua: 'DotBot|rogerbot'}
+  - {id: blexbot, name: BLEXBot, operator: WebMeUp, category: seo, robots: BLEXBot, ua: 'BLEXBot'}
+  - {id: dataforseobot, name: DataForSeoBot, operator: DataForSEO, category: seo, robots: DataForSeoBot, ua: 'DataForSeoBot'}
+  - {id: serpstatbot, name: serpstatbot, operator: Serpstat, category: seo, robots: serpstatbot, ua: 'serpstatbot'}
+  - {id: barkrowler, name: Barkrowler, operator: Babbar, category: seo, robots: Barkrowler, ua: 'Barkrowler'}
+
+  # ── link previews ──
+  - {id: facebook-preview, name: facebookexternalhit, operator: Meta, category: social, ua: 'facebookexternalhit|facebookcatalog'}
+  - {id: twitterbot, name: Twitterbot, operator: X, category: social, ua: 'Twitterbot'}
+  - {id: linkedinbot, name: LinkedInBot, operator: LinkedIn, category: social, ua: 'LinkedInBot'}
+  - {id: slackbot, name: Slackbot, operator: Slack, category: social, ua: 'Slackbot'}
+  - {id: telegrambot, name: TelegramBot, operator: Telegram, category: social, ua: 'TelegramBot'}
+  - {id: discordbot, name: Discordbot, operator: Discord, category: social, ua: 'Discordbot'}
+  - {id: whatsapp, name: WhatsApp, operator: Meta, category: social, ua: 'WhatsApp/'}
+  - {id: pinterestbot, name: Pinterestbot, operator: Pinterest, category: social, ua: 'Pinterestbot|Pinterest/'}
+  - {id: redditbot, name: redditbot, operator: Reddit, category: social, ua: 'redditbot'}
+  - {id: skype-preview, name: SkypeUriPreview, operator: Microsoft, category: social, ua: 'SkypeUriPreview'}
+
+  # ── monitoring ──
+  - {id: uptimerobot, name: UptimeRobot, category: monitoring, ua: 'UptimeRobot'}
+  - {id: pingdom, name: Pingdom, category: monitoring, ua: 'Pingdom'}
+  - {id: statuscake, name: StatusCake, category: monitoring, ua: 'StatusCake'}
+  - {id: site24x7, name: Site24x7, category: monitoring, ua: 'Site24x7'}
+  - {id: betterstack, name: Better Stack, category: monitoring, ua: 'Better Uptime Bot|BetterStack'}
+  - {id: uptime-kuma, name: Uptime Kuma, category: monitoring, ua: 'Uptime-Kuma'}
+  - {id: datadog-synthetics, name: Datadog Synthetics, category: monitoring, ua: 'Datadog/Synthetics'}
+
+  # ── feeds, archives ──
+  - {id: feedly, name: Feedly, category: feed, ua: 'Feedly'}
+  - {id: inoreader, name: Inoreader, category: feed, ua: 'Inoreader'}
+  - {id: newsblur, name: NewsBlur, category: feed, ua: 'NewsBlur'}
+  - {id: internet-archive, name: Internet Archive, category: archive, robots: ia_archiver, ua: 'ia_archiver|archive\.org_bot'}
+
+  # ── libraries and tools (scripts; also what most scanners use) ──
+  - {id: curl, name: curl, category: library, ua: '^curl/'}
+  - {id: wget, name: Wget, category: library, ua: '^Wget/'}
+  - {id: python, name: Python HTTP client, category: library, ua: 'python-requests|python-urllib|python-httpx|aiohttp|Python/'}
+  - {id: go-http, name: Go HTTP client, category: library, ua: 'Go-http-client'}
+  - {id: node-http, name: Node.js HTTP client, category: library, ua: 'node-fetch|axios/|undici|got \(|Node\.js'}
+  - {id: java-http, name: Java HTTP client, category: library, ua: '^Java/|Apache-HttpClient|okhttp'}
+  - {id: scrapy, name: Scrapy, category: library, ua: 'Scrapy'}
+  - {id: other-library, name: Other HTTP library, category: library, ua: 'libwww-perl|PostmanRuntime|^Dart/|reqwest|^Ruby|^PHP|HttpClient'}
+
+  # ── headless browsers ──
+  - {id: headless-chrome, name: Headless Chrome, category: headless, ua: 'HeadlessChrome'}
+  - {id: phantomjs, name: PhantomJS, category: headless, ua: 'PhantomJS|SlimerJS'}
+
+  # ── anything else that calls itself a bot (last: the first matching agent wins) ──
+  - {id: other-bot, name: Other bot, category: other-bot, ua: '(bot|Bot|crawler|Crawler|spider|Spider)\b'}

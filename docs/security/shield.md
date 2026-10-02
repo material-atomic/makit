@@ -76,6 +76,61 @@ client for `ban_for`:
 A server that hosts WordPress should override MK-HTTP-PROBE (copy it into your own catalog with `disabled: true` or
 without the WordPress paths) — see [the catalog](../../security/README.md).
 
+## Scoring
+
+Rules ban on one unmistakable request. Scoring catches the rest: every request gets points from the signals it
+matches, and each IP keeps a score over a window. The scoring set is part of the online catalog
+([`security/scoring/http.yaml`](../../security/scoring/http.yaml)) and updates with `makit rules update`.
+
+- **Request score** — the sum of the signals that match (each counted once, capped at 200). Values are decoded first
+  (URL encoding up to three layers, HTML entities, NUL bytes), so `%253Cscript%253E` is seen as `<script>`.
+- **IP score** — the highest request score in the window (10 minutes), plus escalation (+30 for every 5 suspicious
+  requests) and bursts (30 client errors, or 600 requests, in the window).
+- **Levels and actions** — low ≥30 and medium ≥50 are logged, high ≥80 bans for 1 hour, critical ≥100 bans for 24
+  hours. In `observe` mode nothing is banned. Bursts by status (many 4xx) only count where the status is known: in
+  log analysis.
+
+Signals cover probes (`.env`, `.git`, cloud keys, backups, admin panels), path traversal, XSS in the URL (script
+tags, event handlers, `javascript:`/`data:` URLs, DOM sinks), SQL injection, Log4Shell, command injection, PHP
+wrappers, scanner user agents, raw IP hosts, RDP or TLS spoken to an HTTP port, and the React2Shell pattern.
+
+Compared with the `nginx.score.json` it started from: one explicit model (signals add up, IPs keep a window)
+instead of mixed per-request and per-IP points; case-insensitive patterns on decoded values instead of raw
+substrings; no points for ordinary traffic (status 200, `POST`, `.php` on a PHP site, search words such as "curl");
+WordPress and PHP paths sit in profiles you switch on for servers that run them; IP addresses live in shield lists,
+not in the scoring file; status codes only count in log analysis and as bursts; the SQL injection pattern catches
+quoted forms such as `' or '1'='1`; every signal has a readable label for reports; and XSS, SQL injection,
+Log4Shell, React2Shell, command injection, raw IP hosts and request floods were added.
+
+### Changing the scoring on your server
+
+From the smallest change to the largest:
+
+```yaml
+# /etc/makit/shield.yaml
+scoring:
+  profiles: { wordpress: true }        # this server runs WordPress: do not score wp-* paths
+  actions: { medium: block, high: "ban 6h" }
+  disable: [host-ip-literal]           # signal ids to ignore
+  # enabled: false                     # no scoring at all
+```
+
+To edit the signals themselves, copy the catalog's file and change your copy:
+
+```bash
+makit shield customize scoring        # → /etc/makit/security/scoring/http.yaml
+```
+
+Files under `/etc/makit/security` override the bundled and downloaded catalog and are never overwritten by
+`makit rules update`; the running gate reloads them within two seconds. `makit shield customize bots` and
+`makit shield customize rules` do the same for the bot catalog and the HTTP rules. To keep a scoring file somewhere
+else (a git repo of your own, for example), point to it: `scoring: { file: /srv/ops/makit/http-scoring.yaml }`.
+
+## Bots, crawlers and AI agents
+
+Known bots are recognised and verified, and you decide per category or per bot: allow, log, block, ban or rate
+limit. Clients that hide what they are get a separate bot score. See [Bots, crawlers and AI agents](bots.md).
+
 ## Snapshots
 
 Each decision is a JSON line in `/var/log/makit/shield/requests.jsonl` (rotated): time, client IP, peer, proxy,

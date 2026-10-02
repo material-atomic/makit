@@ -23,6 +23,7 @@ type Scoring struct {
 	Doc        string            `yaml:"doc"`
 	WindowRaw  string            `yaml:"window"`
 	Levels     map[string]int    `yaml:"levels"`
+	LevelOrder []string          `yaml:"level_order"` // lowest first; default low, medium, high, critical
 	Actions    map[string]string `yaml:"actions"`
 	Escalation struct {
 		MinScore int `yaml:"min_score"`
@@ -70,10 +71,15 @@ type ScoringOverrides struct {
 // LoadScoring reads <dir>/scoring/http.yaml from catalog directories (the last one found wins) — or file, when set —
 // and applies overrides.
 func LoadScoring(dirs []string, file string, o ScoringOverrides) (*Scoring, error) {
+	return LoadScoringSet(dirs, "http.yaml", file, o)
+}
+
+// LoadScoringSet is LoadScoring for any scoring set (http.yaml, bots.yaml).
+func LoadScoringSet(dirs []string, name, file string, o ScoringOverrides) (*Scoring, error) {
 	var sc *Scoring
 	paths := []string{}
 	for _, d := range dirs {
-		paths = append(paths, filepath.Join(d, "scoring", "http.yaml"))
+		paths = append(paths, filepath.Join(d, "scoring", name))
 	}
 	if file != "" {
 		if _, err := os.Stat(file); err != nil {
@@ -144,9 +150,12 @@ func LoadScoring(dirs []string, file string, o ScoringOverrides) (*Scoring, erro
 		bs = append(bs, b)
 	}
 	sc.Bursts = bs
-	for _, lvl := range []string{"low", "medium", "high", "critical"} {
+	if len(sc.LevelOrder) == 0 {
+		sc.LevelOrder = []string{"low", "medium", "high", "critical"}
+	}
+	for _, lvl := range sc.LevelOrder {
 		if a := sc.Actions[lvl]; a != "" {
-			if _, _, err := parseAction(a); err != nil {
+			if _, err := ParseAct(a); err != nil {
 				return nil, fmt.Errorf("action %s: %w", lvl, err)
 			}
 		}
@@ -191,7 +200,17 @@ func percentDecode(s string) string {
 }
 
 type scoredRequest struct {
-	fields map[string]string
+	fields     map[string]string
+	hasHeaders bool
+}
+
+// get returns a field; a header the client did not send is "" when headers are known (so '^$' means "missing").
+func (q scoredRequest) get(field string) (string, bool) {
+	v, ok := q.fields[field]
+	if !ok && q.hasHeaders && strings.HasPrefix(field, "header:") {
+		return "", true
+	}
+	return v, ok
 }
 
 func fieldsOf(r Request, status int) scoredRequest {
@@ -212,7 +231,7 @@ func fieldsOf(r Request, status int) scoredRequest {
 		any = append(any, v)
 	}
 	f["any"] = strings.Join(any, "\n")
-	return scoredRequest{f}
+	return scoredRequest{f, r.Headers != nil}
 }
 
 // ScoreRequest adds the points of every matching signal (once each), capped at 200.
@@ -221,12 +240,12 @@ func (sc *Scoring) ScoreRequest(r Request, status int) (int, []string) {
 	total := 0
 	var hits []string
 	for _, s := range sc.Signals {
-		v, ok := q.fields[s.Field]
+		v, ok := q.get(s.Field)
 		if !ok || !s.re.MatchString(v) {
 			continue
 		}
 		if s.Also != nil {
-			av, ok := q.fields[s.Also.Field]
+			av, ok := q.get(s.Also.Field)
 			if !ok || !s.alsoRe.MatchString(av) {
 				continue
 			}
@@ -237,10 +256,14 @@ func (sc *Scoring) ScoreRequest(r Request, status int) (int, []string) {
 	return min(total, 200), hits
 }
 
-// Level maps a score to normal, low, medium, high or critical.
+// Level maps a score to "normal" or the highest level reached (low, medium, high, critical by default).
 func (sc *Scoring) Level(score int) string {
 	lvl := "normal"
-	for _, l := range []string{"low", "medium", "high", "critical"} {
+	order := sc.LevelOrder
+	if len(order) == 0 {
+		order = []string{"low", "medium", "high", "critical"}
+	}
+	for _, l := range order {
 		if t, ok := sc.Levels[l]; ok && score >= t {
 			lvl = l
 		}
@@ -248,31 +271,94 @@ func (sc *Scoring) Level(score int) string {
 	return lvl
 }
 
-// parseAction reads "log", "block" or "ban 1h".
-func parseAction(a string) (string, time.Duration, error) {
-	f := strings.Fields(a)
-	switch {
-	case len(f) == 1 && (f[0] == "log" || f[0] == "block"):
-		return f[0], 0, nil
-	case len(f) == 2 && f[0] == "ban":
-		d, err := time.ParseDuration(f[1])
-		if err != nil {
-			if strings.HasSuffix(f[1], "d") {
-				n, err2 := strconv.Atoi(strings.TrimSuffix(f[1], "d"))
-				return "ban", time.Duration(n) * 24 * time.Hour, err2
-			}
-		}
-		return "ban", d, err
+// Act is a parsed action: allow, log, block, ban <duration> or limit <N>/<window>.
+type Act struct {
+	Kind string        // allow, log, block, ban, limit
+	Dur  time.Duration // ban length, or the limit window
+	N    int           // limit: requests allowed per window
+}
+
+func (a Act) String() string {
+	switch a.Kind {
+	case "ban":
+		return "ban " + fmtDur(a.Dur)
+	case "limit":
+		return fmt.Sprintf("limit %d/%s", a.N, fmtDur(a.Dur))
 	}
-	return "", 0, fmt.Errorf("%q: use log, block or ban <duration>", a)
+	return a.Kind
+}
+
+func fmtDur(d time.Duration) string {
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", d/(24*time.Hour))
+	}
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
+func parseDur(s string) (time.Duration, error) {
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		v, err := strconv.Atoi(n)
+		return time.Duration(v) * 24 * time.Hour, err
+	}
+	return time.ParseDuration(s)
+}
+
+// ParseAct reads "allow", "log", "block", "ban 1h", "ban 7d" or "limit 60/1m".
+func ParseAct(a string) (Act, error) {
+	f := strings.Fields(a)
+	bad := fmt.Errorf("%q: use allow, log, block, ban <duration> or limit <N>/<window>", a)
+	switch {
+	case len(f) == 1 && (f[0] == "allow" || f[0] == "log" || f[0] == "block"):
+		return Act{Kind: f[0]}, nil
+	case len(f) == 2 && f[0] == "ban":
+		d, err := parseDur(f[1])
+		if err != nil || d <= 0 {
+			return Act{}, bad
+		}
+		return Act{Kind: "ban", Dur: d}, nil
+	case len(f) == 2 && f[0] == "limit":
+		ns, ws, ok := strings.Cut(f[1], "/")
+		n, err := strconv.Atoi(ns)
+		if !ok || err != nil || n <= 0 {
+			return Act{}, bad
+		}
+		if ws != "" && (ws[0] < '0' || ws[0] > '9') {
+			ws = "1" + ws // limit 60/m
+		}
+		d, err := parseDur(ws)
+		if err != nil || d <= 0 {
+			return Act{}, bad
+		}
+		return Act{Kind: "limit", N: n, Dur: d}, nil
+	}
+	return Act{}, bad
+}
+
+// parseAction reads "log", "block" or "ban 1h" (kept for callers that only need kind and duration).
+func parseAction(a string) (string, time.Duration, error) {
+	x, err := ParseAct(a)
+	return x.Kind, x.Dur, err
+}
+
+// Act returns the action for a level (log when unset or invalid).
+func (sc *Scoring) Act(level string) Act {
+	a, err := ParseAct(sc.Actions[level])
+	if err != nil {
+		return Act{Kind: "log"}
+	}
+	return a
 }
 
 func (sc *Scoring) Action(level string) (string, time.Duration) {
-	a, d, err := parseAction(sc.Actions[level])
-	if err != nil {
-		return "log", 0
-	}
-	return a, d
+	a := sc.Act(level)
+	return a.Kind, a.Dur
 }
 
 // Tracker keeps per-IP state within the scoring window (bounded: oldest IPs are dropped first).
