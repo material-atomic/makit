@@ -17,8 +17,7 @@
     (Web Bot Auth), SEO, link previews, monitors, libraries, headless browsers. Verified against published ranges or
     forward-confirmed reverse DNS (fake Googlebots caught). Your policy per category or agent: allow, log, block,
     ban, `limit N/window` (429). Bot score for undeclared automation. Your own bot IP sources: URLs refreshed on a
-    schedule, typed IPs (`bots source add`, `bots ip add`). `bots robots` writes robots.txt lines. GoesBot and
-    goes.vn webhooks are allowed by default.
+    schedule, typed IPs (`bots source add`, `bots ip add`). `bots robots` writes robots.txt lines.
   - Batch reports every 5 minutes (`report:`): per suspicious IP with level, readable signals, paths, statuses and
     the action taken; saved to `/var/log/makit/shield/reports`, sent through `makit notify` when worth it.
   - `makit shield analyze FILE` scores nginx/Caddy access logs with the same policy (`--follow --ban --notify`).

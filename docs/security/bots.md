@@ -20,18 +20,17 @@ policy.
    | `ai-assistant` | ChatGPT-User, Claude-User, Perplexity-User | allow |
    | `ai-crawler` | GPTBot, ClaudeBot, CCBot, Bytespider, meta-externalagent | log |
    | `ai-agent` | ChatGPT agent and other signed agents | log |
-   | `seo` | AhrefsBot, SemrushBot, MJ12bot (GoesBot: allow) | log |
+   | `seo` | AhrefsBot, SemrushBot, MJ12bot, GoesBot | log |
    | `social` | facebookexternalhit, Twitterbot, TelegramBot, Slackbot | allow |
    | `monitoring` | UptimeRobot, Pingdom, Uptime Kuma | allow |
    | `feed`, `archive` | Feedly, Internet Archive | allow, log |
-   | `webhook` | goes.vn webhooks | allow |
+   | `webhook` | goes.vn webhooks | log |
    | `library` | curl, python-requests, Go-http-client, axios | log |
    | `headless` | HeadlessChrome, PhantomJS | log |
    | `other-bot` | anything else that calls itself a bot | log |
 
-   An agent can carry its own default: GoesBot (goes.vn's SEO checker) and goes.vn webhooks are allowed, so the
-   checks you ask goes.vn to run on your own sites keep working even when you block SEO crawlers. They are
-   unverified, so they still go through rules and scoring; `makit shield bots set goesbot block` turns them away.
+   The catalog favours no one: every crawler, makit's sister product GoesBot included, gets its category's default
+   until you decide otherwise (`makit shield bots set goesbot allow`, or `block`).
 
 2. **Verification** — anyone can send `User-Agent: Googlebot`. For operators that make it possible, makit checks:
    - the IP is in the ranges the operator publishes (Google, Bing, Apple, OpenAI, Perplexity, DuckDuckGo,

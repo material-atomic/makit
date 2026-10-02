@@ -156,7 +156,9 @@ jobs:
           sudo makit shield bots set ai-crawler block
           sudo makit shield bots set claude-user "limit 2/1m" && sleep 3   # unverifiable agent (ChatGPT-User from a non-OpenAI IP is a fake: 403)
           test "$(ua 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)' 198.51.100.41)" = 403
-          test "$(ua 'GoesBot/1.0 (+https://goes.vn/bot)' 198.51.100.42)" = 200
+          test "$(ua 'GoesBot/1.0 (+https://goes.vn/bot)' 198.51.100.42)" = 200       # seo default: log
+          sudo makit shield bots set seo block && sleep 3
+          test "$(ua 'GoesBot/1.0 (+https://goes.vn/bot)' 198.51.100.42)" = 403       # no favours: blocked with its category
           test "$(ua 'ChatGPT-User/1.0' 198.51.100.43)" = 403          # published ranges: not OpenAI → spoofed
           ua 'Claude-User/1.0' 198.51.100.44 >/dev/null; ua 'Claude-User/1.0' 198.51.100.46 >/dev/null
           test "$(ua 'Claude-User/1.0' 198.51.100.45)" = 429
