@@ -25,6 +25,14 @@ report:                      # batch report every 5 min → /var/log/makit/shiel
   min_level: high            # send when the batch has high/critical traffic (bans and fake bots always)
 bots:                        # known bots, crawlers, AI agents — makit shield bots · makit docs bots
   policy: {}                 # e.g. { ai-crawler: block, gptbot: "limit 30/1m", seo: "ban 24h" }
+ban_scope: server            # automatic bans apply to every site (server) or to the attacked site only (site)
+sites: []                    # per-domain settings over the ones above — makit docs shield (Sites). Example:
+#  - name: blog
+#    match: [blog.example.com, "*.blog.example.com"]
+#    ban_scope: site
+#    scoring: { profiles: { wordpress: true } }
+#    bots: { policy: { ai-crawler: allow } }
+#    report: { notify: [blog-telegram] }
 snapshot:
   path: /var/log/makit/shield/requests.jsonl
   max_mb: 50

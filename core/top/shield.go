@@ -102,7 +102,7 @@ func (m *model) loadShield() tea.Cmd {
 		} else {
 			now := time.Now()
 			for _, e := range st.Allow {
-				s.rows = append(s.rows, shieldRow{"allow", e.Prefix.String(), "permanent", e.Source, e.Reason, []string{"shield", "unallow", e.Prefix.String()}})
+				s.rows = append(s.rows, shieldRow{"allow", e.Prefix.String(), "permanent", atSite(e), e.Reason, []string{"shield", "unallow", e.Prefix.String(), "--site", e.Site}})
 			}
 			for _, a := range cfg.Allow {
 				s.rows = append(s.rows, shieldRow{"allow", a, "permanent", "shield.yaml", "edit /etc/makit/shield.yaml to remove", nil})
@@ -116,7 +116,7 @@ func (m *model) loadShield() tea.Cmd {
 					}
 					when = "until " + e.Until.Local().Format("01-02 15:04")
 				}
-				s.rows = append(s.rows, shieldRow{"ban", e.Prefix.String(), when, e.Source, e.Reason, []string{"shield", "unban", e.Prefix.String()}})
+				s.rows = append(s.rows, shieldRow{"ban", e.Prefix.String(), when, atSite(e), e.Reason, []string{"shield", "unban", e.Prefix.String(), "--site", e.Site}})
 			}
 		}
 		feeds := shield.FeedStatuses()
@@ -242,12 +242,12 @@ func (m *model) shieldButton(b int) tea.Cmd {
 		}
 		return m.runShield("mode "+v, []string{"shield", "mode", v})
 	case btnBan:
-		m.input = &inputBox{prompt: "Ban", hint: "IP or CIDR [duration: 24h, 7d] [reason…]", submit: func(v string) tea.Cmd {
-			f := strings.Fields(v)
+		m.input = &inputBox{prompt: "Ban", hint: "IP or CIDR [duration: 24h, 7d] [@site] [reason…]", submit: func(v string) tea.Cmd {
+			f, site := siteToken(strings.Fields(v))
 			if len(f) == 0 {
 				return nil
 			}
-			args := []string{"shield", "ban", f[0]}
+			args := append([]string{"shield", "ban", f[0]}, site...)
 			rest := f[1:]
 			if len(rest) > 0 && looksLikeDuration(rest[0]) {
 				args, rest = append(args, "--for", rest[0]), rest[1:]
@@ -258,12 +258,12 @@ func (m *model) shieldButton(b int) tea.Cmd {
 			return m.runShield("ban "+f[0], args)
 		}}
 	case btnAllow:
-		m.input = &inputBox{prompt: "Allow", hint: "IP or CIDR [reason…] — never blocked", submit: func(v string) tea.Cmd {
-			f := strings.Fields(v)
+		m.input = &inputBox{prompt: "Allow", hint: "IP or CIDR [@site] [reason…] — never blocked", submit: func(v string) tea.Cmd {
+			f, site := siteToken(strings.Fields(v))
 			if len(f) == 0 {
 				return nil
 			}
-			args := []string{"shield", "allow", f[0]}
+			args := append([]string{"shield", "allow", f[0]}, site...)
 			if len(f) > 1 {
 				args = append(args, "--reason", strings.Join(f[1:], " "))
 			}
@@ -479,4 +479,25 @@ func thousandsN(n int64) string {
 		s = s[:i] + " " + s[i:]
 	}
 	return s
+}
+
+// siteToken takes "@name" out of the words: the entry is then for that site only.
+func siteToken(f []string) ([]string, []string) {
+	out := f[:0:0]
+	var site []string
+	for _, w := range f {
+		if name, ok := strings.CutPrefix(w, "@"); ok && name != "" {
+			site = []string{"--site", name}
+			continue
+		}
+		out = append(out, w)
+	}
+	return out, site
+}
+
+func atSite(e shield.Entry) string {
+	if e.Site != "" {
+		return e.Source + " @" + e.Site
+	}
+	return e.Source
 }

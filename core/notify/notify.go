@@ -170,6 +170,25 @@ func (c *Config) Send(m Message, only string) []error {
 	return errs
 }
 
+// SendTo is Send restricted to the named channels (all channels when names is empty); levels and duplicate
+// suppression apply as for Send.
+func (c *Config) SendTo(m Message, names []string) []error {
+	if len(names) == 0 {
+		return c.Send(m, "")
+	}
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
+	}
+	sub := &Config{}
+	for _, ch := range c.Channels {
+		if want[ch.Name] {
+			sub.Channels = append(sub.Channels, ch)
+		}
+	}
+	return sub.Send(m, "")
+}
+
 var icon = map[string]string{"critical": "🚨", "high": "🔴", "medium": "🟠", "low": "🟡", "info": "ℹ️", "normal": "ℹ️"}
 
 func plain(m Message) string {

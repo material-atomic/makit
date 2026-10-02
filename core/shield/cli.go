@@ -18,10 +18,10 @@ import (
 const usage = `makit shield — IP gate for web traffic (own IP set + allowlist, Cloudflare-aware)
 
   serve                         run the gate (systemd: makit-shield.service)
-  ban IP|CIDR [--for 24h] [--reason TEXT]
-  unban IP|CIDR
-  allow IP|CIDR [--reason TEXT] never blocked (whitelist)
-  unallow IP|CIDR
+  ban IP|CIDR [--for 24h] [--reason TEXT] [--site NAME]
+  unban IP|CIDR [--site NAME]
+  allow IP|CIDR [--reason TEXT] [--site NAME]   never blocked (whitelist)
+  unallow IP|CIDR [--site NAME]
   list [--json]                 block and allow entries with expiry, and bulk list sizes
   import FILE --name NAME [--for 7d] [--reason TEXT]
                                 load a bulk list (one IP/CIDR per line; feeds with comments are fine) — millions OK
@@ -36,7 +36,8 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
                                 change a switch in the config (the running gate reloads within 2 s)
   analyze FILE|- [--format nginx|caddy] [--batch 5m] [--follow] [--ban] [--notify] [--json] [--quiet]
                                 score an nginx/Caddy access log with the same policy and print batch reports
-  report [-n 1] [--date YYYY-MM-DD]
+  sites                         per-domain settings (sites: in shield.yaml) and what each changes
+  report [-n 1] [--date YYYY-MM-DD] [--site NAME]
                                 the latest batch reports (also sent through makit notify when worth it)
   bots …                        known bots, crawlers and AI agents: policy per category or agent (makit shield bots help)
   customize scoring|bots|rules [--to /etc/makit/security]
@@ -98,6 +99,8 @@ func Main(args []string, dirs []string) int {
 		err = cmdBots(cfgPath, dirs, rest)
 	case "report":
 		err = cmdReport(cfgPath, rest)
+	case "sites":
+		err = cmdSites(cfgPath)
 	case "analyze":
 		err = cmdAnalyze(cfgPath, dirs, rest)
 	case "customize":
@@ -120,6 +123,7 @@ func cmdAdd(kind string, args []string) error {
 	dur := fs.Duration("for", 0, "expire after this long (e.g. 24h); default: permanent")
 	reason := fs.String("reason", "", "why (shown in list and logs)")
 	force := fs.Bool("force", false, "ban even a trusted proxy range or your own SSH address")
+	site := fs.String("site", "", "only for this site (a name from sites: in shield.yaml); default: every site")
 	target, rest := splitFirst(args)
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -128,7 +132,12 @@ func cmdAdd(kind string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%q is not an IP or CIDR", target)
 	}
-	e := Entry{Prefix: p, Reason: *reason, Source: "manual", Added: time.Now()}
+	if *site != "" {
+		if err := knownSite(*site); err != nil {
+			return err
+		}
+	}
+	e := Entry{Prefix: p, Reason: *reason, Source: "manual", Added: time.Now(), Site: *site}
 	if *dur > 0 {
 		e.Until = time.Now().Add(*dur)
 	}
@@ -153,7 +162,11 @@ func cmdAdd(kind string, args []string) error {
 		exp = "until " + e.Until.Format("2006-01-02 15:04")
 	}
 	verb := map[string]string{"ban": "blocked", "allow": "allowlisted"}[kind]
-	fmt.Printf("%s %s %s (the running gate picks it up within 2 s)\n", p, verb, exp)
+	where := "on every site"
+	if *site != "" {
+		where = "on " + *site
+	}
+	fmt.Printf("%s %s %s %s (the running gate picks it up within 2 s)\n", p, verb, where, exp)
 	return nil
 }
 
@@ -173,7 +186,12 @@ func lockoutGuard(p netip.Prefix) error {
 }
 
 func cmdRemove(kind string, args []string) error {
-	target, _ := splitFirst(args)
+	target, rest := splitFirst(args)
+	fs := flag.NewFlagSet(kind, flag.ContinueOnError)
+	site := fs.String("site", "*", "only the entry of this site (\"\" = the server-wide one); default: all")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
 	p, err := ParsePrefix(target)
 	if err != nil {
 		return fmt.Errorf("%q is not an IP or CIDR", target)
@@ -181,9 +199,9 @@ func cmdRemove(kind string, args []string) error {
 	found := false
 	_, err = withState(func(st *State) error {
 		if kind == "unban" {
-			st.Block, found = remove(st.Block, p)
+			st.Block, found = remove(st.Block, p, *site)
 		} else {
-			st.Allow, found = remove(st.Allow, p)
+			st.Allow, found = remove(st.Allow, p, *site)
 		}
 		return nil
 	})
@@ -214,7 +232,11 @@ func cmdList(args []string) error {
 			if !e.Until.IsZero() {
 				exp = "until " + e.Until.Format("01-02 15:04") + " (" + time.Until(e.Until).Round(time.Minute).String() + ")"
 			}
-			fmt.Printf("  %-22s %-28s %-14s %s\n", e.Prefix, exp, e.Source, e.Reason)
+			where := "all sites"
+			if e.Site != "" {
+				where = e.Site
+			}
+			fmt.Printf("  %-22s %-16s %-28s %-14s %s\n", e.Prefix, where, exp, e.Source, e.Reason)
 		}
 	}
 	show("blocked", st.Block)
@@ -263,6 +285,7 @@ func cmdCheck(cfgPath string, dirs []string, args []string) error {
 	uri := fs.String("uri", "/", "request URI")
 	method := fs.String("method", "GET", "method")
 	ua := fs.String("ua", "", "user agent")
+	host := fs.String("host", "", "Host header (picks the site)")
 	var hdr multi
 	fs.Var(&hdr, "header", "request header k=v (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -289,7 +312,8 @@ func cmdCheck(cfgPath string, dirs []string, args []string) error {
 		}
 		hdrs[strings.ToLower(k)] = v
 	}
-	d := p.Decide(Request{Peer: *peer, Client: *client, Method: *method, URI: *uri, UA: *ua, Headers: hdrs, Received: time.Now()})
+	p.Share()
+	d := p.Decide(Request{Peer: *peer, Client: *client, Method: *method, Host: *host, URI: *uri, UA: *ua, Headers: hdrs, Received: time.Now()})
 	b, _ := json.MarshalIndent(d, "", "  ")
 	fmt.Println(string(b))
 	return nil
@@ -411,6 +435,7 @@ func cmdReport(cfgPath string, args []string) error {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	n := fs.Int("n", 1, "how many reports")
 	date := fs.String("date", "", "day (default: the latest)")
+	site := fs.String("site", "", "a site's reports (default: the global one)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -419,6 +444,9 @@ func cmdReport(cfgPath string, args []string) error {
 		return err
 	}
 	dir := cfg.Report.Directory()
+	if *site != "" {
+		dir = filepath.Join(dir, *site)
+	}
 	file := filepath.Join(dir, *date+".txt")
 	if *date == "" {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.txt"))
@@ -440,5 +468,73 @@ func cmdReport(cfgPath string, args []string) error {
 		}
 	}
 	fmt.Println(strings.Join(out, "\n\n────────\n\n"))
+	return nil
+}
+
+// knownSite checks a --site name against the config.
+func knownSite(name string) error {
+	path := os.Getenv("MAKIT_SHIELD_CONFIG")
+	if path == "" {
+		path = DefaultConfig
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, sc := range cfg.Sites {
+		if sc.ID() == name {
+			return nil
+		}
+		names = append(names, sc.ID())
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no sites in %s (sites: …) — leave out --site to ban on every site", path)
+	}
+	return fmt.Errorf("no site %q (sites: %s)", name, strings.Join(names, ", "))
+}
+
+// cmdSites lists the sites with what each changes from the global settings.
+func cmdSites(cfgPath string) error {
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	scope := firstNonEmpty(cfg.BanScope, "server")
+	fmt.Printf("global: mode %s · bans %s · every host not listed below\n", cfg.Mode, scope)
+	if len(cfg.Sites) == 0 {
+		fmt.Println("no sites — add per-domain settings under sites: in", cfgPath, "(makit docs shield)")
+		return nil
+	}
+	for _, sc := range cfg.Sites {
+		var diff []string
+		if sc.Mode != "" {
+			diff = append(diff, "mode "+sc.Mode)
+		}
+		diff = append(diff, "bans "+firstNonEmpty(sc.BanScope, scope))
+		if len(sc.Allow) > 0 {
+			diff = append(diff, fmt.Sprintf("+%d allow", len(sc.Allow)))
+		}
+		if sc.Rules.Enabled != nil && !*sc.Rules.Enabled {
+			diff = append(diff, "rules off")
+		} else if sc.Rules.Disable != nil {
+			diff = append(diff, "rules off: "+strings.Join(sc.Rules.Disable, ","))
+		}
+		if !sc.Scoring.empty() {
+			diff = append(diff, "own scoring")
+		}
+		if len(sc.Bots.Policy) > 0 {
+			var b []string
+			for k, v := range sc.Bots.Policy {
+				b = append(b, k+"="+v)
+			}
+			sort.Strings(b)
+			diff = append(diff, "bots "+strings.Join(b, " "))
+		}
+		if len(sc.Report.Notify) > 0 {
+			diff = append(diff, "reports → "+strings.Join(sc.Report.Notify, ","))
+		}
+		fmt.Printf("  %-18s %-36s %s\n", sc.ID(), strings.Join(sc.Match, " "), strings.Join(diff, " · "))
+	}
 	return nil
 }

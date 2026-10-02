@@ -151,6 +151,9 @@ makit shield bots set gptbot "limit 30/1m"  # …or let one in slowly
 makit shield customize scoring              # your own copy of the scoring set in /etc/makit/security
 ```
 
+One server, many domains: the top of `shield.yaml` is the global policy and `sites:` overrides it per domain (mode,
+bans for the site only or the whole server, bot policy, scoring profiles, rules, report channels).
+
 Guide: [docs/security/bots.md](docs/security/bots.md).
 
 ## makit notify

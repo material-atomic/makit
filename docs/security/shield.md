@@ -131,6 +131,47 @@ else (a git repo of your own, for example), point to it: `scoring: { file: /srv/
 Known bots are recognised and verified, and you decide per category or per bot: allow, log, block, ban or rate
 limit. Clients that hide what they are get a separate bot score. See [Bots, crawlers and AI agents](bots.md).
 
+## Sites (one server, many domains)
+
+Everything at the top of `shield.yaml` is the **global** policy. Under `sites:`, each domain lists only what differs;
+a request is decided by the site its Host matches (`Host` in edge mode, `X-Forwarded-Host` in ask mode, `$host` /
+Caddy's host in logs), and by the global policy otherwise.
+
+```yaml
+# global
+mode: block
+bots: { policy: { ai-crawler: block } }
+ban_scope: server
+
+sites:
+  - name: blogcode
+    match: [blogcode.vn, "*.blogcode.vn"]
+    ban_scope: site                       # an attacker of this site is banned here only
+    allow: [203.0.113.0/24]               # on top of the global allowlist
+    rules: { disable: [MK-HTTP-PROBE] }
+    scoring: { profiles: { wordpress: true } }
+    bots: { policy: { ai-crawler: allow } }   # overrides the global ai-crawler: block
+    report: { notify: [blog-telegram] }   # this site's reports go to these channels only
+  - match: [shop.example.com]
+    mode: observe
+```
+
+How a site overrides the global settings:
+
+| Setting | Rule |
+| --- | --- |
+| `mode`, `ban_scope`, `report.min_level` | the site's value replaces the global one |
+| `bots.policy`, `scoring.actions`, `scoring.profiles`, `bots.score.actions` | merged key by key; the site wins where both set a key |
+| `rules.disable`, `scoring.disable`, `bots.score.disable` | the site's list replaces the global list |
+| `allow` | added to the global allowlist (your office stays allowed everywhere) |
+
+Shared by every site: the IP set and bulk lists, server-wide bans, Cloudflare ranges, bot verification. Per site:
+everything above, its own bans (`ban_scope: site`, or `makit shield ban IP --site blogcode`), its allowlist entries
+(`makit shield allow IP --site blogcode`), rate limits, and batch reports (saved under `reports/<site>/`, `makit
+shield report --site blogcode`). An IP's history (escalation, bursts) is shared across sites, except on sites with
+`ban_scope: site`, where what it does there stays there. `makit shield sites` shows what each site changes; `makit
+shield check --host blogcode.vn …` shows a decision for one.
+
 ## Batch reports and alerts
 
 The gate sums up what it saw every five minutes, without anyone running a command: totals, then one block per

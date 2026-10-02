@@ -40,6 +40,8 @@ type Entry struct {
 	Until  time.Time    `json:"until,omitempty"` // zero = permanent
 	Reason string       `json:"reason,omitempty"`
 	Source string       `json:"source,omitempty"` // manual, rule:<id>, list:<name>
+	Site   string       `json:"site,omitempty"`   // only for this site (sites: in shield.yaml); empty = the whole server
+	origin string       // the site where an automatic ban happened (for its report)
 	Added  time.Time    `json:"added"`
 }
 

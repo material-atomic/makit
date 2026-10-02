@@ -160,7 +160,7 @@ func TestDecideWithScoring(t *testing.T) {
 	p.Scoring = scoring(t, ScoringOverrides{})
 	p.Tracker = NewTracker(p.Scoring, 100)
 	var bans []string
-	p.Ban = func(a netip.Addr, d time.Duration, src, why string) {
+	p.Ban = func(a netip.Addr, d time.Duration, src, why, site string, scoped bool) {
 		bans = append(bans, a.String()+" "+src+" "+d.String())
 	}
 	d := p.Decide(Request{Peer: "203.0.113.80", Method: "GET", URI: "/?q=<script>alert(1)</script>", UA: browser, Headers: map[string]string{}})

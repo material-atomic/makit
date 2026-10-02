@@ -73,3 +73,10 @@ func TestVersionLine(t *testing.T) {
 		t.Errorf("narrow status: %q", out)
 	}
 }
+
+func TestSiteToken(t *testing.T) {
+	f, site := siteToken(strings.Fields("198.51.100.7 24h @blogcode scanner probing"))
+	if strings.Join(f, " ") != "198.51.100.7 24h scanner probing" || strings.Join(site, " ") != "--site blogcode" {
+		t.Errorf("%v %v", f, site)
+	}
+}

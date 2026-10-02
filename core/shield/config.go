@@ -57,6 +57,71 @@ type Config struct {
 	} `yaml:"scoring"`
 	Bots   BotsConfig   `yaml:"bots"` // known bots / AI agents policy and the bot score
 	Report ReportConfig `yaml:"report"`
+	// BanScope of automatic bans: server (every site) or site (only the site that was attacked). Sites override it.
+	BanScope string       `yaml:"ban_scope"`
+	Sites    []SiteConfig `yaml:"sites"` // per-domain settings over the global ones above
+}
+
+// SiteConfig is one site (domain) with what differs from the global settings: single values replace them, maps
+// (bot policy, scoring actions and profiles) are merged key by key with the site winning, "disable" lists replace
+// the global list, and allow entries add to the global allowlist.
+type SiteConfig struct {
+	Name     string   `yaml:"name"`      // default: the first match
+	Match    []string `yaml:"match"`     // host names; "*.example.com" for subdomains
+	Mode     string   `yaml:"mode"`      // block | observe | pass
+	BanScope string   `yaml:"ban_scope"` // server | site
+	Allow    []string `yaml:"allow"`
+	Rules    struct {
+		Enabled *bool    `yaml:"enabled"`
+		Disable []string `yaml:"disable"` // rule ids
+	} `yaml:"rules"`
+	Scoring ScoringOverrides `yaml:"scoring"`
+	Bots    struct {
+		Policy map[string]string `yaml:"policy"`
+		Score  ScoringOverrides  `yaml:"score"`
+	} `yaml:"bots"`
+	Report struct {
+		Notify   []string `yaml:"notify"` // makit notify channel names for this site's reports (default: all)
+		MinLevel string   `yaml:"min_level"`
+	} `yaml:"report"`
+}
+
+func (s SiteConfig) ID() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	if len(s.Match) > 0 {
+		return strings.TrimPrefix(s.Match[0], "*.")
+	}
+	return ""
+}
+
+// mergeOverrides lays a site's scoring overrides over the global ones.
+func mergeOverrides(g, s ScoringOverrides) ScoringOverrides {
+	out := ScoringOverrides{Enabled: g.Enabled, Profiles: map[string]bool{}, Actions: map[string]string{}, Disable: g.Disable}
+	for k, v := range g.Profiles {
+		out.Profiles[k] = v
+	}
+	for k, v := range g.Actions {
+		out.Actions[k] = v
+	}
+	if s.Enabled != nil {
+		out.Enabled = s.Enabled
+	}
+	for k, v := range s.Profiles {
+		out.Profiles[k] = v
+	}
+	for k, v := range s.Actions {
+		out.Actions[k] = v
+	}
+	if s.Disable != nil {
+		out.Disable = s.Disable
+	}
+	return out
+}
+
+func (o ScoringOverrides) empty() bool {
+	return o.Enabled == nil && len(o.Profiles) == 0 && len(o.Actions) == 0 && o.Disable == nil
 }
 
 // ReportConfig: batch reports of what the gate saw, saved to files and sent through makit notify.

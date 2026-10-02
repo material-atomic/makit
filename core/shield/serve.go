@@ -33,7 +33,7 @@ func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error
 	if err != nil {
 		return nil, nil, err
 	}
-	allow, block := st.Sets(cfg.Allow)
+	allow, block, siteAllow, siteBlock := st.SiteSets(cfg.Allow)
 	if lists == nil {
 		if lists, _, err = LoadLists(); err != nil {
 			return nil, nil, err
@@ -60,7 +60,124 @@ func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error
 			}
 		}
 	}
+	if err := buildSites(p, cfg, dirs, siteAllow, siteBlock); err != nil {
+		return nil, nil, err
+	}
 	return p, st, nil
+}
+
+// buildSites derives one policy per site from the global one: what a site sets wins, the rest is inherited.
+func buildSites(p *Policy, cfg *Config, dirs []string, siteAllow, siteBlock map[string]*Set) error {
+	p.SiteScoped = cfg.BanScope == "site"
+	if cfg.BanScope != "" && cfg.BanScope != "server" && cfg.BanScope != "site" {
+		return fmt.Errorf("ban_scope: server or site")
+	}
+	p.exact, p.siteSets = map[string]*Policy{}, map[string]*Set{}
+	seen := map[string]bool{}
+	for i, sc := range cfg.Sites {
+		id := sc.ID()
+		where := fmt.Sprintf("sites[%d] (%s)", i, id)
+		if id == "" || len(sc.Match) == 0 {
+			return fmt.Errorf("sites[%d]: match is required", i)
+		}
+		if seen[id] {
+			return fmt.Errorf("%s: two sites with the same name", where)
+		}
+		seen[id] = true
+		sp := *p
+		sp.sites, sp.exact, sp.wild, sp.siteSets = nil, nil, nil, nil
+		sp.Site = id
+		switch sc.Mode {
+		case "":
+		case "block", "observe", "pass":
+			sp.Observe, sp.Pass = sc.Mode == "observe", sc.Mode == "pass"
+		default:
+			return fmt.Errorf("%s: mode block, observe or pass", where)
+		}
+		switch sc.BanScope {
+		case "":
+		case "server", "site":
+			sp.SiteScoped = sc.BanScope == "site"
+		default:
+			return fmt.Errorf("%s: ban_scope server or site", where)
+		}
+		sp.SiteAllow = siteAllow[id]
+		if sp.SiteAllow == nil {
+			sp.SiteAllow = NewSet()
+		}
+		for _, a := range sc.Allow {
+			pfx, err := ParsePrefix(a)
+			if err != nil {
+				return fmt.Errorf("%s allow: %w", where, err)
+			}
+			sp.SiteAllow.Add(Entry{Prefix: pfx, Source: "config", Reason: "site allow", Site: id})
+		}
+		sp.SiteBlock = siteBlock[id]
+		if sp.SiteBlock == nil {
+			sp.SiteBlock = NewSet()
+		}
+		p.siteSets[id] = sp.SiteBlock
+		if sc.Rules.Enabled != nil && !*sc.Rules.Enabled {
+			sp.Rules = nil
+		} else if sc.Rules.Disable != nil {
+			off := map[string]bool{}
+			for _, x := range sc.Rules.Disable {
+				off[x] = true
+			}
+			sp.Rules = nil
+			for _, r := range p.Rules {
+				if !off[r.ID] {
+					sp.Rules = append(sp.Rules, r)
+				}
+			}
+		}
+		var err error
+		if !sc.Scoring.empty() {
+			o := mergeOverrides(cfg.Scoring.ScoringOverrides, sc.Scoring)
+			sp.Scoring = nil
+			if o.Enabled == nil || *o.Enabled {
+				if sp.Scoring, err = LoadScoring(dirs, cfg.Scoring.File, o); err != nil {
+					return fmt.Errorf("%s scoring: %w", where, err)
+				}
+			}
+		}
+		if p.Bots != nil && (len(sc.Bots.Policy) > 0 || !sc.Bots.Score.empty()) {
+			b := cfg.Bots
+			b.Policy = map[string]string{}
+			for k, v := range cfg.Bots.Policy {
+				b.Policy[k] = v
+			}
+			for k, v := range sc.Bots.Policy {
+				b.Policy[k] = v
+			}
+			if sp.Bots, err = LoadBotsConfig(dirs, b); err != nil {
+				return fmt.Errorf("%s bots: %w", where, err)
+			}
+			o := mergeOverrides(cfg.Bots.Score, sc.Bots.Score)
+			sp.BotScore = nil
+			if o.Enabled == nil || *o.Enabled {
+				if sp.BotScore, err = LoadScoringSet(dirs, "bots.yaml", cfg.Bots.ScoreFile, o); err != nil {
+					return fmt.Errorf("%s bot score: %w", where, err)
+				}
+			}
+		}
+		spp := &sp
+		p.sites = append(p.sites, spp)
+		for _, m := range sc.Match {
+			m = strings.ToLower(strings.TrimSpace(m))
+			if suf, ok := strings.CutPrefix(m, "*."); ok {
+				p.wild = append(p.wild, wildSite{"." + suf, spp})
+				continue
+			}
+			if p.exact[m] != nil {
+				return fmt.Errorf("%s: %s is matched by two sites", where, m)
+			}
+			p.exact[m] = spp
+		}
+	}
+	sort.SliceStable(p.wild, func(i, j int) bool { return len(p.wild[i].suffix) > len(p.wild[j].suffix) })
+	// Bans of a site that is no longer configured stay in state.json but are not applied.
+	return nil
 }
 
 // checkHandler answers Caddy forward_auth / nginx auth_request: 2xx allow, 403 block.
@@ -139,8 +256,8 @@ func Serve(cfgPath string, dirs []string) error {
 	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
 	// Batch reports go to every channel of `makit notify` whose min_level they reach (the channel file is read at
 	// each send, so channels added later work without a restart).
-	g.send = func(title, text, level string) { go sendNotify(title, text, level) }
-	g.rep = NewReporter(time.Now())
+	g.send = func(title, text, level string, channels []string) { go sendNotify(title, text, level, channels) }
+	g.repFor("")
 	// Edge listeners start/stop with the "edge" switch and restart when their configuration changes.
 	var edgeMu sync.Mutex
 	var edgeStop context.CancelFunc
@@ -204,7 +321,11 @@ func Serve(cfgPath string, dirs []string) error {
 		}
 		p.Ban = g.autoBan
 		for _, e := range g.unsaved() { // bans still on their way to state.json
-			p.Block.Add(e)
+			if e.Site == "" {
+				p.Block.Add(e)
+			} else if s := p.SiteBlockSet(e.Site); s != nil {
+				s.Add(e)
+			}
 		}
 		g.kernel.Store(c.KernelBlock && c.Mode == "block")
 		if p.Scoring != nil {
@@ -228,6 +349,7 @@ func Serve(cfgPath string, dirs []string) error {
 			}
 		}
 		p.Limiter = limiter
+		p.Share() // sites use the same trackers, verifier, limiter and ban writer
 		cfg = c
 		current.Store(c)
 		labels := map[string]string{}
@@ -238,7 +360,7 @@ func Serve(cfgPath string, dirs []string) error {
 				}
 			}
 		}
-		g.rep.SetLabels(labels)
+		g.setLabels(labels)
 		g.header = c.ClientHeader
 		g.policy.Store(p)
 		g.ask.Store(c.Ask && c.Mode != "pass")
@@ -376,13 +498,21 @@ func Serve(cfgPath string, dirs []string) error {
 	return asrv.Shutdown(sh)
 }
 
-func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason string) {
+func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason, site string, scoped bool) {
 	if d <= 0 {
 		return
 	}
 	now := time.Now()
-	e := Entry{Prefix: netip.PrefixFrom(a, a.BitLen()), Until: now.Add(d), Reason: reason, Source: source, Added: now}
-	g.policy.Load().Block.Add(e) // effective for the next request already
+	e := Entry{Prefix: netip.PrefixFrom(a, a.BitLen()), Until: now.Add(d), Reason: reason, Source: source, Added: now, origin: site}
+	p := g.policy.Load()
+	if scoped && site != "" {
+		e.Site = site
+		if s := p.SiteBlockSet(site); s != nil {
+			s.Add(e) // this site only
+		}
+	} else {
+		p.Block.Add(e) // every site; effective for the next request already
+	}
 	g.banMu.Lock()
 	if len(g.pending) < 200000 {
 		g.pending = append(g.pending, e)
@@ -428,22 +558,7 @@ func (g *Gate) flushBans() {
 		g.inflight = nil
 		g.banMu.Unlock()
 	}()
-	_, err := withState(func(st *State) error {
-		at := make(map[netip.Prefix]int, len(st.Block))
-		for i, e := range st.Block {
-			at[e.Prefix] = i
-		}
-		for _, e := range batch {
-			if i, ok := at[e.Prefix]; ok {
-				st.Block[i] = e
-			} else {
-				at[e.Prefix] = len(st.Block)
-				st.Block = append(st.Block, e)
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	if err := saveBans(batch); err != nil {
 		log.Printf("shield: saving %d bans: %v (they stay active until restart)", len(batch), err)
 		return
 	}
@@ -487,7 +602,7 @@ func (g *Gate) flushBans() {
 	}
 	log.Printf("shield: %s", msg)
 	for _, e := range batch {
-		g.rep.Banned(e) // reported (and notified) with the batch report, not one message per ban
+		g.repFor(e.origin).Banned(e) // reported (and notified) with its site's batch report, not one message per ban
 	}
 }
 
@@ -548,7 +663,15 @@ func (g *Gate) reportLoop(ctx context.Context, cfg func() *Config) {
 		c := cfg()
 		every, on := c.Report.Window()
 		if !on {
-			g.rep.Flush(time.Now(), host) // reports off: keep the window empty
+			g.repMu.Lock()
+			reps := make([]*Reporter, 0, len(g.reps))
+			for _, r := range g.reps {
+				reps = append(reps, r)
+			}
+			g.repMu.Unlock()
+			for _, r := range reps {
+				r.Flush(time.Now(), host) // reports off: keep the windows empty
+			}
 			start = time.Now()
 			continue
 		}
@@ -561,18 +684,38 @@ func (g *Gate) reportLoop(ctx context.Context, cfg func() *Config) {
 }
 
 func (g *Gate) emitReport(c *Config, host string) {
-	b := g.rep.Flush(time.Now(), host)
-	if b == nil {
-		return
+	g.repMu.Lock()
+	sites := make([]string, 0, len(g.reps))
+	for site := range g.reps {
+		sites = append(sites, site)
 	}
-	if err := b.Save(c.Report.Directory(), max(c.Report.KeepDays, 0)+30*boolInt(c.Report.KeepDays == 0)); err != nil {
-		log.Printf("shield: report: %v", err)
+	g.repMu.Unlock()
+	sort.Strings(sites)
+	for _, site := range sites {
+		b := g.repFor(site).Flush(time.Now(), host)
+		if b == nil {
+			continue
+		}
+		b.Site = site
+		b.Text = b.render(g.labels)
+		dir := c.Report.Directory()
+		minLevel, channels := c.Report.MinLevel, []string(nil)
+		if site != "" {
+			dir = filepath.Join(dir, site)
+			for _, sc := range c.Sites {
+				if sc.ID() == site {
+					minLevel, channels = firstNonEmpty(sc.Report.MinLevel, minLevel), sc.Report.Notify
+				}
+			}
+		}
+		if err := b.Save(dir, max(c.Report.KeepDays, 0)+30*boolInt(c.Report.KeepDays == 0)); err != nil {
+			log.Printf("shield: report: %v", err)
+		}
+		if b.Worth(minLevel) && g.send != nil {
+			title, level := b.notification()
+			g.send(title, b.Text, level, channels)
+		}
 	}
-	if !b.Worth(c.Report.MinLevel) || g.send == nil {
-		return
-	}
-	title, level := b.notification()
-	g.send(title, b.Text, level)
 }
 
 func (b *BatchReport) notification() (title, level string) {
@@ -583,19 +726,19 @@ func (b *BatchReport) notification() (title, level string) {
 	return fmt.Sprintf("%d suspicious IPs, %d banned", len(b.IPs)+b.MoreIPs, b.Banned), level
 }
 
-func sendReport(b *BatchReport) {
+func sendReport(b *BatchReport, channels []string) {
 	title, level := b.notification()
-	sendNotify(title, b.Text, level)
+	sendNotify(title, b.Text, level, channels)
 }
 
 // sendNotify delivers through every makit notify channel whose min_level it reaches (the channel file is read at
 // each send, so channels added later work without a restart).
-func sendNotify(title, text, level string) {
+func sendNotify(title, text, level string, channels []string) {
 	c, err := notify.Load(notifyConfig())
 	if err != nil || len(c.Channels) == 0 {
 		return
 	}
-	for _, err := range c.Send(notify.Message{Title: title, Text: text, Level: level, Source: "shield"}, "") {
+	for _, err := range c.SendTo(notify.Message{Title: title, Text: text, Level: level, Source: "shield"}, channels) {
 		log.Printf("shield: notify: %v", err)
 	}
 }

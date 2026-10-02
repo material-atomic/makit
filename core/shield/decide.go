@@ -2,6 +2,7 @@ package shield
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ type Decision struct {
 	Signals []string `json:"signals,omitempty"` // matched scoring signals
 	Bot     *Bot     `json:"bot,omitempty"`     // known bot, or the bot score of an undeclared client
 	Status  int      `json:"status,omitempty"`  // HTTP status for a denial when not 403 (429 for limits)
+	Site    string   `json:"site,omitempty"`    // the site (sites: in shield.yaml) whose policy decided
 }
 
 // Policy holds everything a decision needs.
@@ -50,13 +52,67 @@ type Policy struct {
 	Rules   []HTTPRule
 	Scoring *Scoring
 	Tracker *Tracker
-	Ban     func(addr netip.Addr, d time.Duration, source, reason string) // automatic bans (rules, scores)
+	// Ban records an automatic ban (rules, scores, bots). site is where it happened; scoped makes it apply to that
+	// site only (ban_scope: site) instead of the whole server.
+	Ban func(addr netip.Addr, d time.Duration, source, reason, site string, scoped bool)
 
 	Bots       *BotCatalog // known bots and the maintainer's policy for them
 	BotScore   *Scoring    // bot score for undeclared clients
 	BotTracker *Tracker
 	Verifier   *Verifier
 	Limiter    *Limiter
+
+	// Sites: the global policy holds one policy per site, built at load time; a request is decided by the site its
+	// Host matches, or by the global policy.
+	Site       string // this policy's site ("" = global)
+	SiteScoped bool   // ban_scope: site
+	SiteAllow  *Set   // this site's own allowlist (on top of Allow)
+	SiteBlock  *Set   // this site's own bans (on top of Block)
+	sites      []*Policy
+	exact      map[string]*Policy
+	wild       []wildSite
+	siteSets   map[string]*Set // site → its bans set (shared with the site policies, for automatic bans)
+}
+
+type wildSite struct {
+	suffix string // ".example.com"
+	p      *Policy
+}
+
+// ForHost returns the policy of the site that host belongs to (port and case ignored), or p itself.
+func (p *Policy) ForHost(host string) *Policy {
+	if len(p.sites) == 0 || host == "" {
+		return p
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if sp := p.exact[host]; sp != nil {
+		return sp
+	}
+	for _, w := range p.wild { // longest suffix first
+		if strings.HasSuffix(host, w.suffix) {
+			return w.p
+		}
+	}
+	return p
+}
+
+// Sites lists the site policies.
+func (p *Policy) Sites() []*Policy { return p.sites }
+
+// SiteBlockSet is the set holding a site's own bans (nil for an unknown site).
+func (p *Policy) SiteBlockSet(site string) *Set { return p.siteSets[site] }
+
+// Share hands the global policy's per-process parts (trackers, verifier, limiter, ban function) to every site.
+// Call it after setting them.
+func (p *Policy) Share() {
+	for _, sp := range p.sites {
+		sp.Tracker, sp.BotTracker, sp.Verifier, sp.Limiter, sp.Ban = p.Tracker, p.BotTracker, p.Verifier, p.Limiter, p.Ban
+		sp.Block, sp.Lists, sp.Trusted = p.Block, p.Lists, p.Trusted
+	}
 }
 
 func (p *Policy) trusted(a netip.Addr) bool {
@@ -78,9 +134,17 @@ func firstIP(v string) (netip.Addr, bool) {
 	return a.Unmap(), err == nil
 }
 
-// Decide applies, in order: client IP resolution (header only from trusted proxies) → allowlist → blocklist → known
-// bots (verified + allow skips the rest) → HTTP rules → attack score → bot score for undeclared clients.
+// Decide picks the policy of the request's site, then applies, in order: client IP resolution (header only from
+// trusted proxies) → allowlists → bans and lists → known bots (verified + allow skips the rest) → HTTP rules →
+// attack score → bot score for undeclared clients.
 func (p *Policy) Decide(r Request) Decision {
+	sp := p.ForHost(r.Host)
+	d := sp.decide(r)
+	d.Site = sp.Site
+	return d
+}
+
+func (p *Policy) decide(r Request) Decision {
 	peer, ok := firstIP(r.Peer)
 	if !ok {
 		return Decision{Allow: true, Verdict: "invalid", Reason: "no peer address (check the proxy snippet)", Peer: r.Peer}
@@ -99,9 +163,14 @@ func (p *Policy) Decide(r Request) Decision {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	if e, ok := p.Allow.Match(client, now); ok {
-		d.Verdict, d.Reason = "allowlisted", e.Prefix.String()
-		return d
+	for _, al := range []*Set{p.Allow, p.SiteAllow} {
+		if al == nil {
+			continue
+		}
+		if e, ok := al.Match(client, now); ok {
+			d.Verdict, d.Reason = "allowlisted", e.Prefix.String()
+			return d
+		}
 	}
 	block := func(rule, reason string) Decision {
 		d.Rule, d.Reason = rule, reason
@@ -119,11 +188,11 @@ func (p *Policy) Decide(r Request) Decision {
 			return block(rule, reason), true
 		case "ban":
 			if p.Ban != nil && !p.Observe {
-				p.Ban(client, act.Dur, rule, reason)
+				p.Ban(client, act.Dur, rule, reason, p.Site, p.SiteScoped)
 			}
 			return block(rule, reason), true
 		case "limit":
-			if p.Limiter == nil || p.Limiter.Allow(limitKey, act, now) {
+			if p.Limiter == nil || p.Limiter.Allow(p.Site+"|"+limitKey, act, now) {
 				return d, false
 			}
 			d.Rule, d.Reason = rule, fmt.Sprintf("over %s", act)
@@ -140,6 +209,11 @@ func (p *Policy) Decide(r Request) Decision {
 	for _, a := range []netip.Addr{client, peer} {
 		if e, ok := p.Block.Match(a, now); ok {
 			return block(e.Source, e.Prefix.String()+" "+e.Reason)
+		}
+		if p.SiteBlock != nil {
+			if e, ok := p.SiteBlock.Match(a, now); ok {
+				return block(e.Source, e.Prefix.String()+" "+e.Reason+" (this site)")
+			}
 		}
 		if p.Lists != nil {
 			if e, ok := p.Lists.Match(a, now); ok {
@@ -180,7 +254,7 @@ func (p *Policy) Decide(r Request) Decision {
 	for _, rule := range p.Rules {
 		if rule.Match(r) {
 			if rule.BanFor > 0 && p.Ban != nil && !p.Observe {
-				p.Ban(client, rule.BanFor, "rule:"+rule.ID, rule.Title)
+				p.Ban(client, rule.BanFor, "rule:"+rule.ID, rule.Title, p.Site, p.SiteScoped)
 			}
 			return block("rule:"+rule.ID, rule.Title)
 		}
@@ -189,7 +263,7 @@ func (p *Policy) Decide(r Request) Decision {
 	if p.Scoring != nil {
 		score, hits := p.Scoring.score(q)
 		if p.Tracker != nil {
-			ipScore, bursts := p.Tracker.Observe(client, score, hits, r.Status, now)
+			ipScore, bursts := p.Tracker.ObserveIn(p.trackSite(), client, score, hits, r.Status, now)
 			hits = append(hits, bursts...)
 			score = max(score, ipScore)
 		}
@@ -203,7 +277,7 @@ func (p *Policy) Decide(r Request) Decision {
 	if p.BotScore != nil && d.Bot == nil {
 		score, hits := p.BotScore.score(q)
 		if p.BotTracker != nil {
-			ipScore, bursts := p.BotTracker.Observe(client, score, hits, r.Status, now)
+			ipScore, bursts := p.BotTracker.ObserveIn(p.trackSite(), client, score, hits, r.Status, now)
 			hits = append(hits, bursts...)
 			score = max(score, ipScore)
 		}
@@ -216,4 +290,13 @@ func (p *Policy) Decide(r Request) Decision {
 		}
 	}
 	return d
+}
+
+// trackSite keeps a site's per-IP history apart when its bans are its own (ban_scope: site): what an IP did there
+// must not get it banned elsewhere.
+func (p *Policy) trackSite() string {
+	if p.SiteScoped && p.Site != "" {
+		return p.Site
+	}
+	return ""
 }

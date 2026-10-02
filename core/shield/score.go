@@ -493,7 +493,7 @@ func (sc *Scoring) Action(level string) (string, time.Duration) {
 // Tracker keeps per-IP state within the scoring window (bounded: oldest IPs are dropped first).
 type Tracker struct {
 	mu  sync.Mutex
-	ips map[netip.Addr]*ipState
+	ips map[trackKey]*ipState
 	max int
 	sc  *Scoring
 }
@@ -511,21 +511,33 @@ func NewTracker(sc *Scoring, max int) *Tracker {
 	if max <= 0 {
 		max = 200000
 	}
-	return &Tracker{ips: map[netip.Addr]*ipState{}, max: max, sc: sc}
+	return &Tracker{ips: map[trackKey]*ipState{}, max: max, sc: sc}
 }
 
 // Observe records one request and returns the IP's score (highest request score + escalation + bursts) and the
 // burst signals that fired.
 func (t *Tracker) Observe(ip netip.Addr, reqScore int, signals []string, status int, at time.Time) (int, []string) {
+	return t.ObserveIn("", ip, reqScore, signals, status, at)
+}
+
+// trackKey is an IP, alone (history shared by every site) or within one site (ban_scope: site keeps its own).
+type trackKey struct {
+	ip   netip.Addr
+	site string
+}
+
+// ObserveIn is Observe with the IP's history kept apart for one site ("" = shared).
+func (t *Tracker) ObserveIn(site string, ip netip.Addr, reqScore int, signals []string, status int, at time.Time) (int, []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	st := t.ips[ip]
+	k := trackKey{ip, site}
+	st := t.ips[k]
 	if st == nil || at.Sub(st.first) > t.sc.Window {
 		if st == nil && len(t.ips) >= t.max {
 			t.evict(at)
 		}
 		st = &ipState{first: at, bursts: map[string]int{}, signals: map[string]int{}}
-		t.ips[ip] = st
+		t.ips[k] = st
 	}
 	st.last = at
 	st.count++
@@ -558,25 +570,25 @@ func (t *Tracker) Observe(ip netip.Addr, reqScore int, signals []string, status 
 }
 
 func (t *Tracker) evict(now time.Time) {
-	for ip, st := range t.ips {
+	for k, st := range t.ips {
 		if now.Sub(st.last) > t.sc.Window {
-			delete(t.ips, ip)
+			delete(t.ips, k)
 		}
 	}
 	if len(t.ips) < t.max {
 		return
 	}
 	type kv struct {
-		ip   netip.Addr
+		k    trackKey
 		last time.Time
 	}
 	all := make([]kv, 0, len(t.ips))
-	for ip, st := range t.ips {
-		all = append(all, kv{ip, st.last})
+	for k, st := range t.ips {
+		all = append(all, kv{k, st.last})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
 	for _, x := range all[:len(all)/10+1] {
-		delete(t.ips, x.ip)
+		delete(t.ips, x.k)
 	}
 }
 
@@ -596,7 +608,7 @@ func (t *Tracker) Top(n int) []TopIP {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := make([]TopIP, 0, len(t.ips))
-	for ip, st := range t.ips {
+	for k, st := range t.ips {
 		score := st.maxScore
 		if t.sc.Escalation.Every > 0 {
 			score += t.sc.Escalation.Add * (st.suspicious / t.sc.Escalation.Every)
@@ -607,7 +619,7 @@ func (t *Tracker) Top(n int) []TopIP {
 			}
 		}
 		score = min(score, 200)
-		out = append(out, TopIP{IP: ip.String(), Score: score, Level: t.sc.Level(score), Requests: st.count, Signals: st.signals, First: st.first, Last: st.last})
+		out = append(out, TopIP{IP: k.ip.String(), Score: score, Level: t.sc.Level(score), Requests: st.count, Signals: st.signals, First: st.first, Last: st.last})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {

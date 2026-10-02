@@ -20,6 +20,10 @@
     schedule, typed IPs (`bots source add`, `bots ip add`). `bots robots` writes robots.txt lines.
   - Batch reports every 5 minutes (`report:`): per suspicious IP with level, readable signals, paths, statuses and
     the action taken; saved to `/var/log/makit/shield/reports`, sent through `makit notify` when worth it.
+  - Sites: one server, many domains. The top of `shield.yaml` is the global policy; `sites:` sets per-domain
+    mode, ban scope (server or site), allowlist, rules, scoring, bot policy, reports and notification channels —
+    site values override the global ones where both are set. `ban/allow --site`, `makit shield sites`,
+    `check --host`, `report --site`.
   - `makit shield analyze FILE` scores nginx/Caddy access logs with the same policy (`--follow --ban --notify`).
   - Automatic bans apply at once and are saved in batches (no disk write in the request path); optional nftables
     kernel set; request snapshots; lock-out guards for your SSH address and Cloudflare.

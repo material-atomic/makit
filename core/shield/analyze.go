@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -201,7 +202,7 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 			p.Verifier.LookupAddr = nil
 		}
 	}
-	rep := NewReporter(time.Time{})
+	reps := map[string]*Reporter{} // per site ("" = global)
 	labels := map[string]string{}
 	for _, sc := range []*Scoring{p.Scoring, p.BotScore} {
 		if sc != nil {
@@ -210,37 +211,72 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 			}
 		}
 	}
-	rep.SetLabels(labels)
+	var winStart time.Time
+	repFor := func(site string) *Reporter {
+		r := reps[site]
+		if r == nil {
+			r = NewReporter(winStart)
+			r.SetLabels(labels)
+			reps[site] = r
+		}
+		return r
+	}
 	var bans []Entry
-	p.Ban = func(a netip.Addr, d time.Duration, src, why string) {
+	p.Ban = func(a netip.Addr, d time.Duration, src, why, site string, scoped bool) {
 		now := time.Now() // a ban from an old log line still lasts its full duration from now
 		e := Entry{Prefix: netip.PrefixFrom(a, a.BitLen()), Until: now.Add(d), Reason: why, Source: src, Added: now}
+		if scoped {
+			e.Site = site
+			if s := p.SiteBlockSet(site); s != nil {
+				s.Add(e)
+			}
+		} else {
+			p.Block.Add(e)
+		}
 		bans = append(bans, e)
-		rep.Banned(e)
+		repFor(site).Banned(e)
 	}
+	p.Share()
 	host, _ := os.Hostname()
 	minLevel := firstNonEmpty(o.minLevel, cfg.Report.MinLevel, "high")
-	var winStart time.Time
 	parsed, skipped := 0, 0
 	emit := func(to time.Time) error {
-		b := rep.Flush(to, host)
 		if len(bans) > 0 {
 			if err := saveBans(bans); err != nil {
 				return fmt.Errorf("saving bans: %w", err)
 			}
 			bans = nil
 		}
-		if b == nil || (o.quiet && !b.Worth(minLevel)) {
-			return nil
+		sites := make([]string, 0, len(reps))
+		for site := range reps {
+			sites = append(sites, site)
 		}
-		if o.asJSON {
-			j, _ := json.Marshal(b)
-			fmt.Println(string(j))
-		} else {
-			fmt.Println(b.Text)
-		}
-		if o.notify && b.Worth(minLevel) {
-			sendReport(b)
+		sort.Strings(sites)
+		for _, site := range sites {
+			b := reps[site].Flush(to, host)
+			if b == nil {
+				continue
+			}
+			b.Site = site
+			b.Text = b.render(labels)
+			min, channels := minLevel, []string(nil)
+			for _, sc := range cfg.Sites {
+				if sc.ID() == site {
+					min, channels = firstNonEmpty(o.minLevel, sc.Report.MinLevel, minLevel), sc.Report.Notify
+				}
+			}
+			if o.quiet && !b.Worth(min) {
+				continue
+			}
+			if o.asJSON {
+				j, _ := json.Marshal(b)
+				fmt.Println(string(j))
+			} else {
+				fmt.Println(b.Text)
+			}
+			if o.notify && b.Worth(min) {
+				sendReport(b, channels)
+			}
 		}
 		return nil
 	}
@@ -254,7 +290,6 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 		t := l.Received
 		if winStart.IsZero() {
 			winStart = t.Truncate(window)
-			rep.reset(winStart)
 		}
 		for !t.Before(winStart.Add(window)) { // close every window the log has moved past
 			if err := emit(winStart.Add(window)); err != nil {
@@ -263,12 +298,14 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 			winStart = winStart.Add(window)
 			if t.Sub(winStart) > window { // jump over quiet hours
 				winStart = t.Truncate(window)
-				rep.reset(winStart)
+				for _, r := range reps {
+					r.reset(winStart)
+				}
 			}
 		}
 		d := p.Decide(l.Request)
 		status := l.Status
-		rep.Observe(Snapshot{Time: t, Listener: "log", Decision: d, Method: l.Method, Host: l.Host, URI: l.URI, UA: l.UA,
+		repFor(d.Site).Observe(Snapshot{Time: t, Listener: "log", Decision: d, Method: l.Method, Host: l.Host, URI: l.URI, UA: l.UA,
 			Referer: l.Referer, Status: status})
 		return nil
 	}
@@ -360,15 +397,20 @@ func rotated(f *os.File, path string) bool {
 // saveBans writes bans in one state.json update; a running gate picks them up within 2 s.
 func saveBans(es []Entry) error {
 	_, err := withState(func(st *State) error {
-		at := make(map[netip.Prefix]int, len(st.Block))
+		type key struct {
+			p    netip.Prefix
+			site string
+		}
+		at := make(map[key]int, len(st.Block))
 		for i, e := range st.Block {
-			at[e.Prefix] = i
+			at[key{e.Prefix, e.Site}] = i
 		}
 		for _, e := range es {
-			if i, ok := at[e.Prefix]; ok {
+			k := key{e.Prefix, e.Site}
+			if i, ok := at[k]; ok {
 				st.Block[i] = e
 			} else {
-				at[e.Prefix] = len(st.Block)
+				at[k] = len(st.Block)
 				st.Block = append(st.Block, e)
 			}
 		}

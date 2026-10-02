@@ -58,7 +58,7 @@ func policy(t *testing.T) *Policy {
 func TestDecide(t *testing.T) {
 	p := policy(t)
 	var banned []string
-	p.Ban = func(a netip.Addr, d time.Duration, src, why string) {
+	p.Ban = func(a netip.Addr, d time.Duration, src, why, site string, scoped bool) {
 		banned = append(banned, a.String()+" "+strings.TrimPrefix(src, "rule:"))
 	}
 	cases := []struct {
@@ -385,7 +385,7 @@ func TestAutoBanBatched(t *testing.T) {
 	g.policy.Store(p)
 	start := time.Now()
 	for i := 0; i < 20000; i++ {
-		g.autoBan(netip.AddrFrom4([4]byte{100, 64, byte(i >> 8), byte(i)}), time.Hour, "score:critical", "test")
+		g.autoBan(netip.AddrFrom4([4]byte{100, 64, byte(i >> 8), byte(i)}), time.Hour, "score:critical", "test", "", false)
 	}
 	if el := time.Since(start); el > time.Second {
 		t.Errorf("20000 bans took %s in the request path", el)
@@ -405,7 +405,7 @@ func TestAutoBanBatched(t *testing.T) {
 		t.Errorf("after flush: state %d, unsaved %d, selfWrite %d", len(st.Block), len(g.unsaved()), g.selfWrite.Load())
 	}
 	// Banning again updates in place.
-	g.autoBan(netip.MustParseAddr("100.64.1.1"), 48*time.Hour, "rule:x", "again")
+	g.autoBan(netip.MustParseAddr("100.64.1.1"), 48*time.Hour, "rule:x", "again", "", false)
 	g.flushBans()
 	if st, _ := LoadState(); len(st.Block) != 20000 {
 		t.Errorf("re-ban duplicated: %d", len(st.Block))

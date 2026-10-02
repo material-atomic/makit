@@ -77,7 +77,7 @@ func live(es []Entry, now time.Time) []Entry {
 
 func upsert(es []Entry, e Entry) []Entry {
 	for i := range es {
-		if es[i].Prefix == e.Prefix {
+		if es[i].Prefix == e.Prefix && es[i].Site == e.Site {
 			es[i] = e
 			return es
 		}
@@ -85,20 +85,44 @@ func upsert(es []Entry, e Entry) []Entry {
 	return append(es, e)
 }
 
-func remove(es []Entry, p netip.Prefix) ([]Entry, bool) {
-	for i := range es {
-		if es[i].Prefix == p {
-			return append(es[:i], es[i+1:]...), true
-		}
+// remove drops the entries for p — of one site, or every scope when site is "*".
+func remove(es []Entry, p netip.Prefix, site ...string) ([]Entry, bool) {
+	want := "*"
+	if len(site) > 0 {
+		want = site[0]
 	}
-	return es, false
+	out, found := es[:0], false
+	for _, e := range es {
+		if e.Prefix == p && (want == "*" || e.Site == want) {
+			found = true
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, found
 }
 
-// Sets turns the state plus config allow entries into lookup sets.
+// Sets turns the state plus config allow entries into lookup sets: server-wide ones, and per site.
 func (st *State) Sets(cfgAllow []string) (allow, block *Set) {
+	allow, block, _, _ = st.SiteSets(cfgAllow)
+	return allow, block
+}
+
+func (st *State) SiteSets(cfgAllow []string) (allow, block *Set, siteAllow, siteBlock map[string]*Set) {
 	allow, block = NewSet(), NewSet()
+	siteAllow, siteBlock = map[string]*Set{}, map[string]*Set{}
+	get := func(m map[string]*Set, k string) *Set {
+		if m[k] == nil {
+			m[k] = NewSet()
+		}
+		return m[k]
+	}
 	for _, e := range st.Allow {
-		allow.Add(e)
+		if e.Site != "" {
+			get(siteAllow, e.Site).Add(e)
+		} else {
+			allow.Add(e)
+		}
 	}
 	for _, a := range cfgAllow {
 		if p, err := ParsePrefix(a); err == nil {
@@ -106,7 +130,11 @@ func (st *State) Sets(cfgAllow []string) (allow, block *Set) {
 		}
 	}
 	for _, e := range st.Block {
-		block.Add(e)
+		if e.Site != "" {
+			get(siteBlock, e.Site).Add(e)
+		} else {
+			block.Add(e)
+		}
 	}
-	return allow, block
+	return
 }

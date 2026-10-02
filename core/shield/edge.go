@@ -26,9 +26,11 @@ type Gate struct {
 	ask    atomic.Bool // /check enforces; off = always allow
 	rec    *Recorder
 	header string
-	send   func(title, text, level string) // makit notify, set by Serve
+	send   func(title, text, level string, channels []string) // makit notify, set by Serve
 
-	rep *Reporter // batch reports (report.go)
+	repMu  sync.Mutex
+	reps   map[string]*Reporter // batch reports per site ("" = global)
+	labels map[string]string
 
 	// Automatic bans take effect in memory at once; a writer persists them in batches (see banWriter).
 	banMu     sync.Mutex
@@ -303,5 +305,36 @@ func tlsConfig(l Listener) (*tls.Config, error) {
 // record writes the snapshot and counts it in the current batch report.
 func (g *Gate) record(s Snapshot) {
 	g.rec.Write(s)
-	g.rep.Observe(s)
+	g.repFor(s.Site).Observe(s)
+}
+
+func (g *Gate) repFor(site string) *Reporter {
+	g.repMu.Lock()
+	defer g.repMu.Unlock()
+	if g.reps == nil {
+		g.reps = map[string]*Reporter{}
+	}
+	r := g.reps[site]
+	if r == nil {
+		if len(g.reps) > 1000 { // unknown site names never come from requests, but stay bounded anyway
+			return g.reps[""]
+		}
+		r = NewReporter(time.Now())
+		r.SetLabels(g.labels)
+		g.reps[site] = r
+	}
+	return r
+}
+
+func (g *Gate) setLabels(m map[string]string) {
+	g.repMu.Lock()
+	g.labels = m
+	reps := make([]*Reporter, 0, len(g.reps))
+	for _, r := range g.reps {
+		reps = append(reps, r)
+	}
+	g.repMu.Unlock()
+	for _, r := range reps {
+		r.SetLabels(m)
+	}
 }

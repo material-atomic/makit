@@ -55,6 +55,7 @@ type botAgg struct {
 
 // BatchReport is one window.
 type BatchReport struct {
+	Site     string         `json:"site,omitempty"`
 	Host     string         `json:"host"`
 	From     time.Time      `json:"from"`
 	To       time.Time      `json:"to"`
@@ -286,7 +287,11 @@ func thousands(n int) string {
 
 func (b *BatchReport) render(labels map[string]string) string {
 	var w strings.Builder
-	fmt.Fprintf(&w, "makit shield · %s · %s–%s UTC\n", b.Host, b.From.UTC().Format("2006-01-02 15:04"), b.To.UTC().Format("15:04"))
+	where := b.Host
+	if b.Site != "" {
+		where = b.Site + " (" + b.Host + ")"
+	}
+	fmt.Fprintf(&w, "makit shield · %s · %s–%s UTC\n", where, b.From.UTC().Format("2006-01-02 15:04"), b.To.UTC().Format("15:04"))
 	counts := map[string]int{}
 	for _, a := range b.IPs {
 		counts[a.Level]++
