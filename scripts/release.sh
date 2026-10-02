@@ -8,7 +8,7 @@ v=${1:?usage: scripts/release.sh X.Y.Z}; tag="v$v"
 tests/smoke.sh >/dev/null
 echo "$v" > VERSION
 perl -pi -e "s/MAKIT_VERSION:-v[0-9.]+/MAKIT_VERSION:-$tag/; s#makit/v[0-9.]+/install.sh#makit/$tag/install.sh#" install.sh
-perl -pi -e "s#makit/v[0-9.]+/install.sh#makit/$tag/install.sh#g" README.md
+perl -pi -e "s#makit/v[0-9.]+/install.sh#makit/$tag/install.sh#g; s#makit\.sh/v[0-9.]+/install.sh#makit.sh/$tag/install.sh#g; s#sh -s -- v[0-9.]+#sh -s -- $tag#g" README.md
 git commit -qam "release: $tag"
 git tag -a "$tag" -m "makit $tag"
 git push -q origin main "$tag"
@@ -26,3 +26,4 @@ curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/$tag/install.
 Source tarball SHA256 (\`MAKIT_SHA256\`): \`$tarsum\`
 Source tarball and makit-core binaries: \`SHA256SUMS\` (verified by install.sh)."
 echo "released $tag"
+echo "next: add makit.sh/$tag/install.sh on the website (RunSnip project makit.sh), a pinned copy of the previous one"
