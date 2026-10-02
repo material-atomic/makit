@@ -4,21 +4,16 @@ Where makit is going next. There are no dates: a version ships when it is done a
 people need, so if something here matters to you — or is missing — say so in an
 [issue](https://github.com/material-atomic/makit/issues) or write to hello@makit.sh.
 
-## Now — v0.5.x
-
-Fixes and small additions on top of v0.5.0.
-
-- **Client IP behind load balancers.** Read `X-Forwarded-For` from the right: skip the addresses of your trusted
-  proxies and take the first one that is not, so a client cannot choose its own IP by sending the header itself.
-  (`CF-Connecting-IP` holds a single address and is not affected.)
-- **Presets for `trusted_proxies`**: `aws-alb` / `vpc` alongside `cloudflare`, so the right ranges are one word away.
-
 ## Next — v0.6: clusters, cloud load balancers and a config playground
 
 makit started on single servers. v0.6 brings the request shield to clusters behind a cloud load balancer
 (AWS ALB/NLB first), where the load balancer keeps TLS and makit decides on every request behind it — and makes
 its configuration easier to write, with a playground on makit.sh.
 
+- **Client IP behind load balancers.** Read `X-Forwarded-For` from the right: skip the addresses of your trusted
+  proxies and take the first one that is not, so a client cannot choose its own IP by sending the header itself.
+  (`CF-Connecting-IP` holds a single address and is not affected.) Presets for `trusted_proxies`: `aws-alb` / `vpc`
+  alongside `cloudflare`.
 - **makit in Kubernetes.** An official container image of `makit-core`, a Helm chart and plain manifests,
   health and readiness checks, configuration from a ConfigMap.
 - **Ingress controllers ask makit.** Ready-made setups for ingress-nginx (`auth-url`) and Traefik (`forwardAuth`),
