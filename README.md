@@ -4,10 +4,17 @@
 
 Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatably.
 
+Install (as root):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh | bash
-makit init --dry-run     # see what would change
-makit init               # do it
+```
+
+Set up the server — preview first, then apply:
+
+```bash
+makit init --dry-run
+makit init
 ```
 
 `makit init` runs, in order: system upgrade and base packages → swap → kernel settings → Docker → (optional)
