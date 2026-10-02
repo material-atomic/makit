@@ -1,5 +1,7 @@
 # makit
 
+[![ci](https://github.com/material-atomic/makit/actions/workflows/ci.yml/badge.svg)](https://github.com/material-atomic/makit/actions/workflows/ci.yml)
+
 Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatably.
 
 ```bash
@@ -130,6 +132,9 @@ scripts/build.sh        # gofmt + vet + tests, then makit-core for linux/amd64 a
 scripts/release.sh X.Y.Z    # bump, tag, push, build and publish the GitHub release
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash bin/makit lib/common.sh lib/cmd/*.sh install.sh
 ```
+
+CI (GitHub Actions) runs all of the above on every push, plus `makit init` for real — twice — on Ubuntu 22.04 and
+24.04 VMs, then checks with `makit list` that every part is in place.
 
 Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit` dispatches to them. `makit top` and
 `makit scan` live in `core/` (Go, no cgo): `core/sys` reads `/proc` and the Docker socket, `core/top` is the dashboard,

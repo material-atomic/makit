@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash \
+            bin/makit lib/common.sh lib/cmd/*.sh install.sh tests/*.sh scripts/*.sh
+
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: gofmt, vet, test (loads the repository's security catalog)
+        working-directory: core
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: makit in ubuntu:24.04 and debian:12 containers
+        run: tests/smoke.sh
+
+  scan-e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: build makit-core
+        working-directory: core
+        run: CGO_ENABLED=0 go build -trimpath -o ../dist/makit-core-linux-amd64 .
+      - name: replay a React2Shell-style compromise and check every finding
+        run: tests/scan-e2e.sh
+
+  # Real VMs: run makit init for real, twice (idempotency), then verify every managed part is in place.
+  vm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: install from this checkout
+        run: |
+          (cd core && CGO_ENABLED=0 go build -trimpath -o ../libexec/makit-core .)
+          sudo mkdir -p /opt/makit && sudo cp -r . /opt/makit/ci && sudo ln -sfn /opt/makit/ci/bin/makit /usr/local/bin/makit
+          makit version
+      - name: makit init --dry-run
+        run: sudo makit --dry-run init --sysctl opensearch
+      - name: makit init (real; SSH stays as configured by the runner)
+        run: sudo makit init --sysctl opensearch --no-ssh-harden
+      - name: makit init again (must be harmless)
+        run: sudo makit init --sysctl opensearch --no-ssh-harden
+      - name: every part in place
+        run: |
+          sudo makit list
+          sudo makit list --json | python3 -c '
+          import json, sys
+          bad = [c["title"] + ": " + c["detail"] for c in json.load(sys.stdin) if not c["installed"] and c["id"] not in ("upgrade", "ssh")]
+          print("\n".join(bad)); sys.exit(1 if bad else 0)'
+      - name: makit status and a read-only scan of the runner
+        run: |
+          sudo makit status
+          sudo makit scan --consent || test $? -eq 1
