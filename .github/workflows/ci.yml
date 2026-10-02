@@ -118,7 +118,7 @@ jobs:
           docker run -d --name caddy --network host -v /tmp/Caddyfile:/etc/caddy/Caddyfile caddy:2
           sleep 3
           code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-          sudo makit shield ban 203.0.113.9 --for 1h --reason ci
+          sudo makit shield ban 203.0.113.9 --for 1h --reason ci && sleep 3   # the gate reloads lists within 2 s
           for port in 8088 8090; do
             test "$(code -H 'CF-Connecting-IP: 198.51.100.20' http://127.0.0.1:$port/)" = 200
             test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:$port/)" = 403

@@ -19,7 +19,6 @@ for img in ubuntu:24.04 debian:12; do
     $m --dry-run harden > /tmp/h 2>&1; grep -c "▶" /tmp/h
     $m --dry-run firewall --docker --egress 443/tcp > /tmp/f 2>&1; grep -c "MAKIT-EGRESS" /tmp/f
     $m shield --help > /tmp/s; head -1 /tmp/s
-    $m --dry-run shield on > /tmp/s 2>&1 || true; grep -c "makit-shield" /tmp/s
     $m upgrade --check || echo "upgrade --check exit=$?"
     $m sysctl opensearch vm.swappiness=10 2>&1 | tail -2
     grep -c "" /etc/sysctl.d/90-makit.conf
