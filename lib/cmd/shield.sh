@@ -92,6 +92,11 @@ makit shield ask on|off      Caddy/nginx ask makit before each request (/check);
 makit shield edge on|off     makit in front of Caddy/nginx (the listeners in $SHIELD_CONF)
 makit shield mode block|observe
 makit shield ban|unban|allow|unallow|list|check|log|snippet …   (makit shield help-core for details)
+makit shield bots …          bots, crawlers and AI agents: allow, log, block, ban or limit per category or bot
+makit shield sites           per-domain settings (sites: in shield.yaml) over the global ones
+makit shield report          the latest batch report (sent through makit notify when it matters)
+makit shield analyze FILE    score an nginx/Caddy access log with the same policy
+makit shield customize …     your own copy of the scoring set, bot catalog or rules
 Blocks IPs from its own set (no ipset), Cloudflare-aware: behind Cloudflare it reads the visitor's IP from
 CF-Connecting-IP, but only when the connection really comes from Cloudflare. Two ways to use it:
   · Caddy/nginx ask makit before each request (makit shield snippet caddy|nginx)
