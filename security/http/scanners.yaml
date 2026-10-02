@@ -1,0 +1,7 @@
+id: MK-HTTP-SCANNER
+title: Vulnerability scanner user agent
+doc: docs/security/shield.md#rules
+ban_for: 24h
+match:
+  user_agents:
+    - '(?i)(sqlmap|nikto|nuclei|masscan|zgrab|dirbuster|gobuster|feroxbuster|wpscan|nmap scripting engine|acunetix|netsparker)'

@@ -36,6 +36,7 @@ Commands:
   scan        Read-only security check of the host or containers (asks for consent first)
   rules       The security catalog scan uses (makit rules list|update|path)
   schedule    Scheduled scans with alerts (makit schedule scan daily --webhook=URL)
+  shield      IP gate for web traffic, Cloudflare-aware (makit shield on|off|ban|allow|log|snippet)
   docs        Security guides: what each finding means and how to fix it (makit docs ssh)
   upgrade     Check for a newer makit and install it (makit upgrade [--check] [vX.Y.Z])
   version     Print the version

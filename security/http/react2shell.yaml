@@ -1,0 +1,11 @@
+id: MK-HTTP-R2S
+title: Scripted Next.js Server Action call (React2Shell / CVE-2025-55182 exploitation pattern)
+doc: docs/security/shield.md#rules
+refs: [CVE-2025-55182]
+ban_for: 168h
+match:
+  methods: [POST]
+  headers:
+    next-action: '.+'
+  user_agents:
+    - '(?i)^(python-requests|python-urllib|aiohttp|go-http-client|curl/|wget/|libwww-perl|okhttp)'

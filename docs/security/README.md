@@ -21,6 +21,7 @@ that fixes it for you. Every finding of `makit scan` links to its page; on a ser
 | [Malware indicators](malware.md) | MK-PROC-*, MK-FILE-*, MK-NET-*, catalog rules | [incident response](incident-response.md) |
 | [Persistence](persistence.md) | MK-PERSIST-* | [incident response](incident-response.md) |
 | [Scheduled scans](scheduled-scans.md) | — | `makit schedule scan` |
+| [Request shield](shield.md) | MK-HTTP-* | `makit shield on` |
 | [Backups](backups.md) | — | your backup tool |
 | [Cloud and code accounts](accounts.md) | — | provider settings |
 | [Incident response](incident-response.md) | — | — |

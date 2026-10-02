@@ -43,6 +43,7 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | `makit scan [options]` | Read-only security check of the host and/or containers — see below. |
 | `makit rules list\|update\|path` | The security catalog `scan` uses; `update` fetches the newest one from this repository. |
 | `makit schedule scan daily\|weekly\|hourly\|off [--webhook=URL]` | Scheduled read-only scans (systemd timer) with a webhook alert when something MEDIUM or worse is found. Consent is asked once. |
+| `makit shield on\|off\|ban\|allow\|list\|log\|snippet …` | IP gate for web traffic — its own block set and allowlist, Cloudflare-aware, HTTP rules with automatic bans, request snapshots. Caddy/nginx ask it, or it sits in front of them — see below. |
 | `makit docs [topic\|RULE-ID]` | The [security guides](docs/security/README.md), offline: what each finding means and how to fix it. |
 | `makit upgrade [--check] [vX.Y.Z]` | Checks GitHub for a newer makit and installs it after asking (`--check` only reports: exit 10 when an update exists). `self-update` is an alias. |
 | `makit version`, `makit -v`, `makit --version` | Prints the installed version. |
@@ -106,6 +107,24 @@ Everything it knows — indicators, patterns, severities, vulnerabilities (OSV f
 [`security/`](security/README.md), read from the bundled catalog, the newest one from this repository
 (`makit rules update`) and your own (`--rules DIR`). Each finding names its rule (`MK-…`) and references (CVE ids).
 Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent not given.
+
+## makit shield
+
+Blocks visitors by IP before they reach your app, with its own set (IPs/CIDRs with expiry — no ipset) and an
+allowlist that always wins. Behind Cloudflare it uses the visitor's IP from `CF-Connecting-IP`, but only when the
+connection really comes from Cloudflare; a direct visitor faking the header is judged on its own IP. HTTP rules from the
+catalog ban scanners, secret probing, path traversal and the React2Shell exploitation pattern automatically.
+
+```bash
+makit shield on                    # --observe to only log what would be blocked
+makit shield snippet caddy         # Caddy/nginx ask makit before every request (forward_auth / auth_request)
+makit shield ban 198.51.100.7 --for 24h
+makit shield allow 192.0.2.10
+makit shield log --blocked
+```
+
+Or put makit in front of Caddy/nginx (it terminates TLS and forwards to localhost). Guide:
+[docs/security/shield.md](docs/security/shield.md).
 
 ## Safety
 

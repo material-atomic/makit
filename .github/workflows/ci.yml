@@ -88,6 +88,53 @@ jobs:
           sudo systemctl start makit-scan.service
           sudo ls /var/log/makit/scans/ | grep -q '^scan-.*\.json$'
           sudo makit schedule status
+      - name: shield — Caddy asks makit; makit in front; bans, rules, allowlist, kernel set
+        run: |
+          set -x
+          sudo makit shield on
+          # The local proxies stand in for Cloudflare here: trust loopback so CF-Connecting-IP is used.
+          sudo sed -i 's#^trusted_proxies: .*#trusted_proxies: [cloudflare, 127.0.0.1/32]#; s#^kernel_block: .*#kernel_block: true#' /etc/makit/shield.yaml
+          printf 'listeners:\n  - name: edge\n    listen: "127.0.0.1:8090"\n    upstream: http://127.0.0.1:8091\n' | sudo tee -a /etc/makit/shield.yaml
+          sudo sed -i 's#^listeners: \[\].*##' /etc/makit/shield.yaml
+          sudo systemctl restart makit-shield && sleep 2
+          (mkdir -p /tmp/www && echo hello > /tmp/www/index.html && cd /tmp/www && python3 -m http.server 8091 --bind 127.0.0.1 &) ; sleep 1
+          cat > /tmp/Caddyfile <<'CADDY'
+          {
+          	admin off
+          	auto_https off
+          }
+          (makit_shield) {
+          	forward_auth 127.0.0.1:9180 {
+          		uri /check
+          		header_up X-Makit-Peer {remote_host}
+          		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+          	}
+          }
+          :8088 {
+          	import makit_shield
+          	respond "ok"
+          }
+          CADDY
+          docker run -d --name caddy --network host -v /tmp/Caddyfile:/etc/caddy/Caddyfile caddy:2
+          sleep 3
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          sudo makit shield ban 203.0.113.9 --for 1h --reason ci
+          for port in 8088 8090; do
+            test "$(code -H 'CF-Connecting-IP: 198.51.100.20' http://127.0.0.1:$port/)" = 200
+            test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:$port/)" = 403
+          done
+          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/.env)" = 403   # rule + auto-ban
+          sleep 1
+          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/)" = 403        # still banned
+          sudo makit shield allow 198.51.100.30 && sleep 3
+          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/)" = 200        # allowlist wins
+          sudo nft list set inet makit_shield block4 | grep -q 203.0.113.9
+          sudo makit shield list
+          sudo makit shield log --blocked
+          sudo makit shield status
+          sudo makit shield off && sleep 2
+          test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:8088/)" = 200          # off = pass
+          docker rm -f caddy
       - name: every part in place
         run: |
           sudo makit list

@@ -1,0 +1,8 @@
+id: MK-HTTP-TRAVERSAL
+title: Path traversal or system file request
+doc: docs/security/shield.md#rules
+ban_for: 24h
+match:
+  paths:
+    - '(?i)(\.\./|\.\.%2f|%2e%2e(/|%2f)|%252e%252e)'
+    - '(?i)/(etc/passwd|etc/shadow|proc/self/environ|win\.ini)'

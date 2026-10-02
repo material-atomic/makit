@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.0
+- `makit shield`: IP gate for web traffic with its own block set (IP/CIDR, expiry; no ipset) and allowlist.
+  - Ask mode: Caddy `forward_auth` / nginx `auth_request` call `/check` (`makit shield snippet caddy|nginx`).
+  - Edge mode: makit in front of Caddy/nginx — TLS (ACME TLS-ALPN, Cloudflare Origin Certificate or files), blocked
+    direct visitors disconnected at accept, real client IP forwarded; `tcp://` passthrough with optional PROXY v1.
+  - Cloudflare-aware: `CF-Connecting-IP` trusted only from Cloudflare ranges (refreshed daily); spoofing ignored.
+  - HTTP rules in the catalog (`security/http/`): secret/admin probing, path traversal, scanner user agents,
+    React2Shell pattern — with automatic bans.
+  - Request snapshots (no bodies, cookies or credentials), `log`, `status`, `check`; optional nftables kernel set.
+  - `on` / `off` (pass, proxies keep working) / `uninstall`; lock-out guards for your SSH address and Cloudflare.
+- Guide: docs/security/shield.md. Setup tab: request shield.
+
 ## v0.4.0
 - Security guides in `docs/security/` (one page per topic); every finding links its page for the running version,
   and `makit docs <topic|RULE-ID>` shows it offline.

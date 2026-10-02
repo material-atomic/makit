@@ -12,6 +12,7 @@ COMPONENTS=(
   "harden|Server hardening|harden|Kernel settings, /dev/shm noexec, SSH limits, fail2ban, AppArmor, auditd"
   "dockerfw|Docker firewall|firewall --docker|Published container ports follow ufw"
   "schedule|Scheduled security scan|schedule scan daily --consent|Daily read-only makit scan with alerts"
+  "shield|Request shield|shield on|IP gate for web traffic (block list, allowlist, HTTP rules)"
   "opensearch|OpenSearch kernel setting|sysctl opensearch|vm.max_map_count = 262144 (OpenSearch/Elasticsearch)"
 )
 
@@ -61,6 +62,9 @@ check_component() {
     schedule)
       if systemctl is-enabled --quiet makit-scan.timer 2>/dev/null; then echo "ok|$(sed -n 's/^schedule=//p' /etc/makit/scan-consent 2>/dev/null)"
       else echo "missing|not scheduled"; fi ;;
+    shield)
+      if systemctl is-active --quiet makit-shield 2>/dev/null; then echo "ok|mode $(sed -n 's/^mode: *\([a-z]*\).*/\1/p' /etc/makit/shield.yaml 2>/dev/null)"
+      else echo "missing|off"; fi ;;
     *) echo "missing|unknown component" ;;
   esac
 }

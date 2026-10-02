@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/material-atomic/makit/core/scan"
+	"github.com/material-atomic/makit/core/shield"
 	"github.com/material-atomic/makit/core/top"
 )
 
@@ -16,10 +17,10 @@ var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: makit-core top|scan|version [options]")
+		fmt.Fprintln(os.Stderr, "usage: makit-core top|scan|shield|version [options]")
 		os.Exit(2)
 	}
-	top.Version, scan.Version = version, version
+	top.Version, scan.Version, shield.Version = version, version, version
 	sub, args := os.Args[1], os.Args[2:]
 	switch sub {
 	case "version", "--version":
@@ -38,6 +39,8 @@ func main() {
 		}
 	case "scan":
 		os.Exit(scan.Main(args))
+	case "shield":
+		os.Exit(shield.Main(args, scan.CatalogDirs()))
 	default:
 		fmt.Fprintln(os.Stderr, "unknown subcommand:", sub)
 		os.Exit(2)

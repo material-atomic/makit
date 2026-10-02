@@ -1,0 +1,12 @@
+# HTTP rules for makit shield (security/http/*.yaml). Fields under match are ANDed, patterns inside one field ORed.
+# ban_for: how long the client IP is blocked after a match (0 or empty = only this request). disabled: true turns
+# a rule off (e.g. MK-HTTP-PROBE's WordPress paths on a server that hosts WordPress: copy and override it).
+id: MK-HTTP-PROBE
+title: Probing for secrets, backups and admin panels
+doc: docs/security/shield.md#rules
+ban_for: 24h
+match:
+  paths:
+    - '(?i)^/(\.env|\.git/|\.svn/|\.hg/|\.aws/|\.ssh/|\.docker/|\.DS_Store)'
+    - '(?i)^/[^?]*\.(sql|sql\.gz|bak|swp)(\?|$)'
+    - '(?i)^/(wp-login\.php|xmlrpc\.php|wp-admin/|phpmyadmin|pma/|adminer\.php|server-status|actuator/|vendor/phpunit/|cgi-bin/)'
