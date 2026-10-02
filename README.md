@@ -20,7 +20,7 @@ updated with `makit rules update` and overridable per server. What the shield co
 Install (as root):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.5.0/install.sh | bash
 ```
 
 Set up a new server — preview first, then apply:
@@ -183,7 +183,7 @@ Guide: [docs/security/notifications.md](docs/security/notifications.md).
 Pin a version (never `main`) and, if you like, check the release tarball:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.4.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.5.0/install.sh -o install.sh
 less install.sh
 MAKIT_SHA256=<sha256 from the release notes> bash install.sh
 ```
