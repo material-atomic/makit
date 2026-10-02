@@ -7,7 +7,7 @@ Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatabl
 Install (as root):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.4.0/install.sh | bash
 ```
 
 Set up the server — preview first, then apply:
@@ -123,7 +123,7 @@ Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent 
 Pin a version (never `main`) and, if you like, check the release tarball:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.4.0/install.sh -o install.sh
 less install.sh
 MAKIT_SHA256=<sha256 from the release notes> bash install.sh
 ```
