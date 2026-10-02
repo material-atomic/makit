@@ -271,7 +271,7 @@ func Serve(cfgPath string, dirs []string) error {
 			lastCfg = st.ModTime()
 		}
 		tick, daily := time.NewTicker(2*time.Second), time.NewTicker(24*time.Hour)
-		catFP := catalogFingerprint(dirs)
+		catFP := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile)
 		for {
 			select {
 			case <-ctx.Done():
@@ -291,7 +291,7 @@ func Serve(cfgPath string, dirs []string) error {
 				if listsFingerprint() != listsFP {
 					changed = true
 				}
-				if fp := catalogFingerprint(dirs); fp != catFP {
+				if fp := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile); fp != catFP {
 					catFP, changed = fp, true // a customized scoring/bots/rules file was edited
 				}
 				if changed {
@@ -365,9 +365,15 @@ func containsStr(xs []string, s string) bool {
 	return false
 }
 
-// catalogFingerprint changes when any scoring, bots or HTTP rule file in the catalog directories changes.
-func catalogFingerprint(dirs []string) string {
+// catalogFingerprint changes when any scoring, bots or HTTP rule file in the catalog directories changes, or one of
+// the maintainer's own files named in shield.yaml.
+func catalogFingerprint(dirs []string, files ...string) string {
 	var b strings.Builder
+	for _, f := range files {
+		if info, err := os.Stat(f); f != "" && err == nil {
+			fmt.Fprintf(&b, "%s:%d:%d;", f, info.Size(), info.ModTime().UnixNano())
+		}
+	}
 	for _, d := range dirs {
 		for _, sub := range []string{"scoring", "bots", "http"} {
 			ents, _ := os.ReadDir(filepath.Join(d, sub))
