@@ -224,5 +224,5 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 ## Roadmap
 
 Next is v0.6: the request shield for clusters behind a cloud load balancer (AWS ALB/NLB first) — a container image and
-Helm chart, ingress-nginx and Traefik in ask mode, one ban list shared by every replica. Everything planned, and what is
-not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).
+Helm chart, ingress-nginx and Traefik in ask mode, one ban list shared by every replica — and a config playground on
+makit.sh that builds `shield.yaml` from blocks. Everything planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).

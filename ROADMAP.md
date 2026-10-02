@@ -13,10 +13,11 @@ Fixes and small additions on top of v0.5.0.
   (`CF-Connecting-IP` holds a single address and is not affected.)
 - **Presets for `trusted_proxies`**: `aws-alb` / `vpc` alongside `cloudflare`, so the right ranges are one word away.
 
-## Next — v0.6: clusters and cloud load balancers
+## Next — v0.6: clusters, cloud load balancers and a config playground
 
 makit started on single servers. v0.6 brings the request shield to clusters behind a cloud load balancer
-(AWS ALB/NLB first), where the load balancer keeps TLS and makit decides on every request behind it.
+(AWS ALB/NLB first), where the load balancer keeps TLS and makit decides on every request behind it — and makes
+its configuration easier to write, with a playground on makit.sh.
 
 - **makit in Kubernetes.** An official container image of `makit-core`, a Helm chart and plain manifests,
   health and readiness checks, configuration from a ConfigMap.
@@ -26,6 +27,14 @@ makit started on single servers. v0.6 brings the request shield to clusters behi
   banned by one pod is banned by all.
 - **Guide: behind a cloud load balancer.** How to keep the real client IP (ALB headers, NLB proxy protocol or IP
   targets), which ranges to trust, and why the kernel layer stays off there.
+- **Config playground on makit.sh.** Build `shield.yaml` and `notify.yaml` in the browser instead of from a blank
+  file: start from a preset (single site, many domains, behind Cloudflare, behind a load balancer), add blocks —
+  sites, allowlists, rules, scoring levels, bot policies, rate limits, notification channels — and see the
+  resulting YAML as you go. Checked against the same schema makit uses, then exported as a file to copy to
+  `/etc/makit/` or as a Kubernetes ConfigMap. Nothing leaves your browser; secrets such as webhook URLs stay
+  placeholders unless you type them.
+- **`makit shield config check`.** Validates a config file on the server before it is loaded, with the same
+  messages as the playground, so a pasted file never takes the shield down.
 
 ## Later
 
