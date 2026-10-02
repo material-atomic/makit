@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Installs makit on a server:
-#   curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.2.0/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh | bash
 # Env: MAKIT_VERSION (tag to install, default below), MAKIT_SHA256 (optional checksum of the source tarball).
 set -euo pipefail
 
-MAKIT_VERSION=${MAKIT_VERSION:-v0.2.0}
+MAKIT_VERSION=${MAKIT_VERSION:-v0.3.0}
 MAKIT_REPO=${MAKIT_REPO:-material-atomic/makit}
 PREFIX=/opt/makit
 

@@ -3,7 +3,7 @@
 Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatably.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh | bash
 makit init --dry-run     # see what would change
 makit init               # do it
 ```
@@ -105,7 +105,7 @@ Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent 
 Pin a version (never `main`) and, if you like, check the release tarball:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.2.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.3.0/install.sh -o install.sh
 less install.sh
 MAKIT_SHA256=<sha256 from the release notes> bash install.sh
 ```
