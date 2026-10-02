@@ -1,0 +1,16 @@
+id: MK-DROPPER
+title: Script downloads and runs code (dropper pattern)
+severity: high
+refs: [CVE-2025-55182]
+# A file is reported when it matches at least min_matches patterns (one is enough in start-up entries,
+# and any indicator string from another rule counts on its own).
+min_matches: 2
+patterns:
+  - { id: download-from-ip, regex: '(?i)\b(wget|curl)\b[^\n|;]*https?://\d{1,3}(\.\d{1,3}){3}[^\s''"]*' }
+  - { id: download-pipe-shell, regex: '(?i)\b(wget|curl)\b[^\n]*\|\s*(ba|da)?sh\b' }
+  - { id: download-to-tmp, regex: '(?i)\b(wget|curl)\b[^\n]*-[oO]\s*/(tmp|var/tmp|dev/shm)/' }
+  - { id: chmod-tmp, regex: '(?i)chmod\s+(\+x|[0-7]*7[0-7]{2})\s+/(tmp|var/tmp|dev/shm)/' }
+  - { id: nohup-tmp, regex: '(?i)nohup\s+/(tmp|var/tmp|dev/shm)/' }
+  - { id: base64-pipe-shell, regex: '(?i)base64\s+(-d|--decode)[^\n]*\|\s*(ba)?sh\b' }
+  - { id: dev-tcp, regex: '/dev/tcp/\d{1,3}(\.\d{1,3}){3}/\d+' }
+  - { id: rm-tmp, regex: '(?i)\brm\s+-f\s+/(tmp|var/tmp|dev/shm)/\S+' }

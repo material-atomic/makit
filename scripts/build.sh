@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 version=${1:-$(cat VERSION)}
 mkdir -p dist && rm -f dist/makit-core-linux-* dist/SHA256SUMS
-docker run --rm -v "$PWD/core:/src" -v "$PWD/dist:/out" -w /src golang:1 sh -euc "
+docker run --rm -v "$PWD:/repo" -v "$PWD/dist:/out" -w /repo/core golang:1 sh -euc "
   gofmt -l . | (! grep .) || { echo 'gofmt needed'; exit 1; }
   go vet ./... && go test ./...
   for arch in amd64 arm64; do

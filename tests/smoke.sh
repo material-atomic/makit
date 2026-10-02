@@ -12,7 +12,9 @@ for img in ubuntu:24.04 debian:12; do
     $m --dry-run init --sysctl opensearch --volume auto --docker-volumes 2>&1 | tail -5 || true
     $m --dry-run init --no-ssh-harden > /tmp/dry.log 2>&1; grep -c "\[dry-run\]" /tmp/dry.log
     $m base >/dev/null && echo "base: ok"
-    $m --dry-run upgrade --full --autoremove | tail -3
+    $m --dry-run system-upgrade --full --autoremove > /tmp/u; tail -3 /tmp/u
+    $m rules path
+    $m upgrade --check || echo "upgrade --check exit=$?"
     $m sysctl opensearch vm.swappiness=10 2>&1 | tail -2
     grep -c "" /etc/sysctl.d/90-makit.conf
     $m sysctl vm.swappiness=20 >/dev/null 2>&1; grep swappiness /etc/sysctl.d/90-makit.conf

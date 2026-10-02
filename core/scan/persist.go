@@ -42,20 +42,17 @@ func (s *scanner) persistence(t target) {
 				for _, w := range strings.Fields(l) {
 					w = strings.Trim(w, `"';=`)
 					if inTemp(w) || (strings.HasPrefix(w, "/") && hidden(w) && !strings.Contains(w, "/.config/") && !strings.Contains(w, "/.local/")) {
-						s.rep.add(Finding{Severity: High, Target: t.name, Kind: "persistence", Path: disp,
-							Title: "Start-up entry runs a program from a temporary or hidden path", Evidence: []string{clip(l, 200)}})
+						s.emit("MK-PERSIST-TEMP-EXEC", Finding{Target: t.name, Kind: "persistence", Path: disp}, "", nil, clip(l, 200))
 					}
 				}
 			}
 		}
 		if (strings.Contains(disp, "cron") || strings.Contains(disp, "systemd/system")) && st.ModTime().After(recent) {
-			s.rep.add(Finding{Severity: Info, Target: t.name, Kind: "persistence", Path: disp,
-				Title: "Start-up entry changed in the last 7 days (review)", Evidence: []string{"modified " + st.ModTime().Format("2006-01-02 15:04")}})
+			s.emit("MK-PERSIST-RECENT", Finding{Target: t.name, Kind: "persistence", Path: disp}, "", nil, "modified "+st.ModTime().Format("2006-01-02 15:04"))
 		}
 	}
 	if b, err := os.ReadFile(j("/etc/ld.so.preload")); err == nil && strings.TrimSpace(string(b)) != "" {
-		s.rep.add(Finding{Severity: High, Target: t.name, Kind: "persistence", Path: "/etc/ld.so.preload",
-			Title: "Libraries are force-loaded into every process (common rootkit technique)", Evidence: strings.Fields(string(b))})
+		s.emit("MK-PERSIST-PRELOAD", Finding{Target: t.name, Kind: "persistence", Path: "/etc/ld.so.preload"}, "", nil, strings.Fields(string(b))...)
 	}
 	keys, _ := filepath.Glob(j("/root/.ssh/authorized_keys"))
 	more, _ := filepath.Glob(j("/home/*/.ssh/authorized_keys"))
@@ -74,11 +71,18 @@ func (s *scanner) persistence(t target) {
 				}
 			}
 		}
-		sev, title := Info, "Authorized SSH keys"
-		if st.ModTime().After(recent) {
-			sev, title = Low, "Authorized SSH keys changed in the last 7 days (verify every key is yours)"
+		sev, on := s.cat.check("MK-PERSIST-SSH-KEYS")
+		if !on {
+			continue
 		}
-		s.rep.add(Finding{Severity: sev, Target: t.name, Kind: "persistence", Path: strings.TrimPrefix(k, strings.TrimSuffix(t.root, "/")), Title: title,
+		title := "Authorized SSH keys"
+		if st.ModTime().After(recent) {
+			title = "Authorized SSH keys changed in the last 7 days (verify every key is yours)"
+			if sev < Low {
+				sev = Low
+			}
+		}
+		s.rep.add(Finding{Severity: sev, Rule: "MK-PERSIST-SSH-KEYS", Target: t.name, Kind: "persistence", Path: strings.TrimPrefix(k, strings.TrimSuffix(t.root, "/")), Title: title,
 			Evidence: []string{strings.Join(append([]string{itoa(n) + " key(s)"}, names...), ", "), "modified " + st.ModTime().Format("2006-01-02 15:04")}})
 	}
 }

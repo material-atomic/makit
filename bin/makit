@@ -21,7 +21,7 @@ Usage: makit [--dry-run] [--yes] <command> [options]
 Commands:
   init        Everything below in a safe order (start here on a new server)
   base        Update the system and install base packages
-  upgrade     apt-get update + upgrade      (makit upgrade [--full] [--autoremove])
+  system-upgrade  apt-get update + upgrade  (makit system-upgrade [--full] [--autoremove])
   swap        Create a swap file            (makit swap [SIZE|auto])
   sysctl      Persist kernel settings       (makit sysctl KEY=VALUE… | opensearch)
   docker      Install Docker Engine + Compose, cap container logs
@@ -32,8 +32,9 @@ Commands:
   status      Show what makit manages on this machine
   list        Each managed part and whether it is in place (--json for tools)
   top         Terminal dashboard: system, processes, containers, services, logs, setup
-  scan        Read-only malware check of the host or containers (asks for consent first)
-  self-update Install another makit version (makit self-update [vX.Y.Z])
+  scan        Read-only security check of the host or containers (asks for consent first)
+  rules       The security catalog scan uses (makit rules list|update|path)
+  upgrade     Check for a newer makit and install it (makit upgrade [--check] [vX.Y.Z])
   version     Print the version
 
 Global options:

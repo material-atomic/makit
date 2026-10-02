@@ -17,8 +17,8 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | Command | What it does |
 | --- | --- |
 | `makit init [options]` | Everything below, in a safe order. `makit init --help` lists the options. |
-| `makit upgrade [--full] [--autoremove]` | `apt-get update` + `upgrade` (or `dist-upgrade` with `--full`), non-interactive, keeps your config files, warns when a reboot is required. |
-| `makit base` | `makit upgrade`, then installs curl, git, rsync, ufw, fail2ban, unattended-upgrades, jq… |
+| `makit system-upgrade [--full] [--autoremove]` | `apt-get update` + `upgrade` (or `dist-upgrade` with `--full`), non-interactive, keeps your config files, warns when a reboot is required. |
+| `makit base` | `makit system-upgrade`, then installs curl, git, rsync, ufw, fail2ban, unattended-upgrades, jq… |
 | `makit swap [SIZE\|auto]` | Creates `/swapfile` (auto: 2G below 2 GB of RAM, 4G up to 16 GB, none above) and sets `vm.swappiness=10`. Never resizes an existing swap file. |
 | `makit sysctl KEY=VALUE… \| opensearch` | Persists kernel settings in `/etc/sysctl.d/90-makit.conf` and applies them. `opensearch` = `vm.max_map_count=262144`. |
 | `makit docker` | Docker Engine + Compose plugin from download.docker.com; caps container logs at 3 × 20 MB (only if `/etc/docker/daemon.json` does not exist yet). |
@@ -29,8 +29,10 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | `makit status` | Read-only summary: RAM, swap, disks, Docker, firewall, SSH, kernel settings, pending reboot. |
 | `makit list [--json]` | Each part makit manages and whether it is in place (the Setup tab uses this). |
 | `makit top` | Terminal dashboard with mouse support — see below. |
-| `makit scan [options]` | Read-only malware check of the host and/or containers — see below. |
-| `makit self-update [vX.Y.Z]` | Installs another release (default: latest). |
+| `makit scan [options]` | Read-only security check of the host and/or containers — see below. |
+| `makit rules list\|update\|path` | The security catalog `scan` uses; `update` fetches the newest one from this repository. |
+| `makit upgrade [--check] [vX.Y.Z]` | Checks GitHub for a newer makit and installs it after asking (`--check` only reports: exit 10 when an update exists). `self-update` is an alias. |
+| `makit version`, `makit -v`, `makit --version` | Prints the installed version. |
 
 Global options: `--dry-run` (change nothing), `--yes` (confirm prompts, e.g. `--format` without a terminal).
 
@@ -57,7 +59,7 @@ row to select it (click again to open), click buttons. Keyboard: `1`–`7`, arro
 
 ## makit scan
 
-A **read-only** search for malware dropped on a server or inside containers — for example the Go backdoor dropped
+A **read-only** security check: a search for malware dropped on a server or inside containers — for example the Go backdoor dropped
 through CVE-2025-55182 (React2Shell) as `/tmp/vim`, started with `nohup` and then deleted
 ([analysis](https://github.com/ngvcanh/CVE-2025-55182-Attack-Analysis)).
 
@@ -82,7 +84,9 @@ What it looks for:
 - **Persistence**: cron, systemd units, `rc.local`, `/etc/ld.so.preload`, shell profiles, recently changed SSH keys.
 - **Entry points**: installed Next.js / React Server Components versions vulnerable to CVE-2025-55182.
 
-Indicators: a built-in set (`makit scan --list-iocs`) plus your own with `--iocs file.json` (same JSON shape).
+Everything it knows — indicators, patterns, severities, vulnerabilities (OSV format) — is data in
+[`security/`](security/README.md), read from the bundled catalog, the newest one from this repository
+(`makit rules update`) and your own (`--rules DIR`). Each finding names its rule (`MK-…`) and references (CVE ids).
 Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent not given.
 
 ## Safety
@@ -121,6 +125,7 @@ MIT — free for any use.
 
 ```bash
 tests/smoke.sh          # makit in throwaway ubuntu:24.04 and debian:12 containers
+tests/scan-e2e.sh       # replays a React2Shell-style compromise in Docker and checks every finding of makit scan
 scripts/build.sh        # gofmt + vet + tests, then makit-core for linux/amd64 and arm64 into dist/
 scripts/release.sh X.Y.Z    # bump, tag, push, build and publish the GitHub release
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash bin/makit lib/common.sh lib/cmd/*.sh install.sh
@@ -132,5 +137,6 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 
 ## Roadmap
 
-- A Scan tab in `makit top`, and scheduled scans with alerts.
+- Security first: more sources for the catalog (osv.dev, GitHub advisories), more package ecosystems (dpkg, pip, Go
+  binaries), a Scan tab in `makit top`, scheduled scans with alerts.
 - Monitoring: a small agent and ready-made images for metrics, logs and alerts.

@@ -29,6 +29,8 @@ type Finding struct {
 	Severity Severity `json:"severity"`
 	Target   string   `json:"target"` // host, or container:<name>
 	Kind     string   `json:"kind"`   // process, file, persistence, network, package
+	Rule     string   `json:"rule"`   // MK-… check or rule id from the catalog
+	Refs     []string `json:"refs,omitempty"`
 	Title    string   `json:"title"`
 	Path     string   `json:"path,omitempty"`
 	PID      int      `json:"pid,omitempty"`
@@ -42,6 +44,7 @@ type Report struct {
 	Host     string    `json:"host"`
 	Operator string    `json:"operator"`
 	Targets  []string  `json:"targets"`
+	Catalog  []string  `json:"catalog"`
 	Stats    Stats     `json:"stats"`
 	Findings []Finding `json:"findings"`
 	Notes    []string  `json:"notes,omitempty"`
@@ -94,6 +97,7 @@ func (r *Report) Print(w io.Writer, color bool) {
 	}
 	fmt.Fprintf(w, "\nmakit scan %s · %s · %s → %s\n", r.Version, r.Host, r.Started.Format(time.RFC3339), r.Finished.Format("15:04:05"))
 	fmt.Fprintf(w, "targets: %s\n", strings.Join(r.Targets, ", "))
+	fmt.Fprintf(w, "catalog: %s\n", strings.Join(r.Catalog, ", "))
 	fmt.Fprintf(w, "checked: %d processes, %d files, %d sockets, %d packages\n\n", r.Stats.Processes, r.Stats.Files, r.Stats.Sockets, r.Stats.Packages)
 	counts := map[Severity]int{}
 	for _, f := range r.Findings {
@@ -107,7 +111,11 @@ func (r *Report) Print(w io.Writer, color bool) {
 		if f.PID > 0 {
 			loc = fmt.Sprintf("pid %d %s", f.PID, f.Path)
 		}
-		fmt.Fprintf(w, "%s %s · %s · %s\n", c(f.Severity, fmt.Sprintf("[%s]", f.Severity)), f.Title, f.Target, f.Kind)
+		refs := ""
+		if len(f.Refs) > 0 {
+			refs = " · " + strings.Join(f.Refs, ", ")
+		}
+		fmt.Fprintf(w, "%s %s · %s · %s%s\n", c(f.Severity, fmt.Sprintf("[%s]", f.Severity)), f.Title, f.Target, f.Rule, refs)
 		if loc != "" {
 			fmt.Fprintf(w, "    %s\n", loc)
 		}

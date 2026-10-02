@@ -1,0 +1,24 @@
+# Built-in checks (logic lives in makit-core). This file sets their severity and lets a catalog turn one off.
+# Severities: info, low, medium, high, critical.
+checks:
+  MK-PROC-DELETED-TEMP:  { severity: critical, title: "Process runs a deleted executable from a temporary/hidden path (run-then-rm dropper)" }
+  MK-PROC-DELETED:       { severity: low,      title: "Process runs an executable that was replaced or deleted (often an update: restart it)" }
+  MK-PROC-MEMFD:         { severity: medium,   title: "Process runs from memory only (memfd, no file on disk)" }
+  MK-PROC-TEMP:          { severity: high,     title: "Process runs from a temporary or hidden directory" }
+  MK-PROC-KTHREAD:       { severity: high,     title: "User process disguised as a kernel thread" }
+  MK-PROC-NAME-MISMATCH: { severity: high,     title: "Process name does not match its executable" }
+  MK-PROC-IOC:           { severity: critical, title: "Process matches a known indicator (path, hash or command line)" }
+  MK-NET-IOC:            { severity: critical, title: "Connection to a known malicious IP" }
+  MK-NET-PORT:           { severity: medium,   title: "Outbound connection to a port used by miners/backdoors" }
+  MK-NET-SUSPICIOUS:     { severity: high,     title: "Process from a temporary/deleted executable has a network connection" }
+  MK-FILE-IOC:           { severity: critical, title: "File matches a known indicator (hash or path)" }
+  MK-FILE-EXEC-TEMP:     { severity: medium,   title: "Executable in a temporary directory" }
+  MK-FILE-EXEC-ADDED:    { severity: medium,   title: "Executable added to the container after it started" }
+  MK-FILE-EXEC-HIDDEN:   { severity: high,     title: "Executable hidden in a dot-directory/dot-file" }
+  MK-FILE-GO-TRAITS:     { severity: high,     title: "Go binary with HTTP + SOCKS5 + TLS/ChaCha20 (backdoor traits) in a suspicious place" }
+  MK-FILE-SYSTEM-NAME:   { severity: high,     title: "Executable named like a system tool outside system directories" }
+  MK-PERSIST-TEMP-EXEC:  { severity: high,     title: "Start-up entry runs a program from a temporary or hidden path" }
+  MK-PERSIST-RECENT:     { severity: info,     title: "Start-up entry changed in the last 7 days (review)" }
+  MK-PERSIST-PRELOAD:    { severity: high,     title: "Libraries are force-loaded into every process (/etc/ld.so.preload)" }
+  MK-PERSIST-SSH-KEYS:   { severity: info,     title: "Authorized SSH keys (low when changed in the last 7 days)" }
+  MK-VULN:               { severity: high,     title: "Installed package is affected by a known vulnerability (severity from the advisory)" }

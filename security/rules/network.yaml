@@ -1,0 +1,13 @@
+id: MK-NET
+title: Suspicious outbound ports
+ports:
+  - { value: 3333, note: stratum mining }
+  - { value: 4444, note: mining / reverse shells }
+  - { value: 5555, note: mining }
+  - { value: 6666, note: mining / IRC bots }
+  - { value: 7777, note: mining }
+  - { value: 9999, note: mining }
+  - { value: 14433, note: monero mining (TLS) }
+  - { value: 14444, note: monero mining }
+  - { value: 45560, note: mining }
+  - { value: 45700, note: monero mining }

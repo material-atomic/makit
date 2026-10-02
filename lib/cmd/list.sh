@@ -2,7 +2,7 @@
 # Components makit manages, with a read-only check for each. Used by `makit list` and the Setup tab of `makit top`.
 # Each line: id|title|install command|description
 COMPONENTS=(
-  "upgrade|System updates|upgrade|Installed packages are up to date"
+  "upgrade|System updates|system-upgrade|Installed packages are up to date"
   "base|Base packages|base|curl, git, rsync, ufw, fail2ban, unattended-upgrades, jq…"
   "swap|Swap|swap|A swap file sized for this machine's RAM"
   "docker|Docker|docker|Docker Engine + Compose, container logs capped"

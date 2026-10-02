@@ -16,7 +16,6 @@ var systemNames = map[string]bool{"vim": true, "vi": true, "sshd": true, "system
 	"sh": true, "nginx": true, "httpd": true, "apache2": true, "php-fpm": true, "node": true, "python": true, "python3": true,
 	"dbus-daemon": true, "rsyslogd": true, "kthreadd": true, "kworker": true, "ksoftirqd": true, "top": true, "ps": true, "docker": true,
 	"containerd": true, "dockerd": true, "init": true, "agetty": true, "atd": true, "irqbalance": true, "udevd": true, "systemd-journald": true}
-var minerPorts = map[int]bool{3333: true, 4444: true, 5555: true, 6666: true, 7777: true, 9999: true, 14433: true, 14444: true, 45560: true, 45700: true}
 var cidRe = regexp.MustCompile(`[0-9a-f]{64}`)
 
 func inTemp(p string) bool {
@@ -94,43 +93,36 @@ func (s *scanner) processes(allProcs bool, targets []target) {
 		deleted := strings.HasSuffix(exe, " (deleted)")
 		path := strings.TrimSuffix(exe, " (deleted)")
 		f := Finding{Target: tname, Kind: "process", PID: pid, Path: path, Evidence: []string{"cmdline: " + clip(cmdline, 160)}}
-		report := func(sev Severity, title string, ev ...string) {
-			g := f
-			g.Severity, g.Title, g.Evidence = sev, title, append(append([]string{}, f.Evidence...), ev...)
-			s.rep.add(g)
-		}
 		memfd := strings.HasPrefix(path, "/memfd:")
 		temp := inTemp(path) || hidden(path)
 		switch {
 		case memfd:
-			report(Medium, "Process runs from memory only (memfd, no file on disk)")
+			s.emit("MK-PROC-MEMFD", f, "", nil)
 		case deleted && temp:
-			report(Critical, "Process runs a deleted executable from a temporary/hidden path (dropper pattern: run then rm)")
+			s.emit("MK-PROC-DELETED-TEMP", f, "", nil)
 		case deleted:
-			report(Low, "Process runs an executable that was replaced or deleted (often just an update: restart it)")
+			s.emit("MK-PROC-DELETED", f, "", nil)
 		case temp:
-			report(High, "Process runs from a temporary or hidden directory")
+			s.emit("MK-PROC-TEMP", f, "", nil)
 		}
 		if strings.HasPrefix(argv0, "[") && strings.HasSuffix(strings.Fields(argv0 + " x")[0], "]") {
-			report(High, "User process disguised as a kernel thread", "kernel threads have no executable; this one runs "+exe)
+			s.emit("MK-PROC-KTHREAD", f, "", nil, "kernel threads have no executable; this one runs "+exe)
 		}
 		n0, ne := filepath.Base(strings.Fields(argv0 + " x")[0]), filepath.Base(path)
 		if systemNames[n0] && n0 != ne && !strings.HasPrefix(ne, n0) && (temp || deleted || memfd) {
-			report(High, fmt.Sprintf("Process name %q does not match its executable %q", n0, ne))
+			s.emit("MK-PROC-NAME-MISMATCH", f, fmt.Sprintf("Process name %q does not match its executable %q", n0, ne), nil)
 		}
-		if note, ok := s.iocs.path[path]; ok {
-			report(Critical, "Process runs a known malware path", note)
+		if m, ok := s.cat.path[path]; ok {
+			s.emitRule(m.rule, Critical, f, "Process runs a known malware path: "+m.rule.Title, m.note)
 		}
-		for _, i := range s.iocs.Strings {
-			if strings.Contains(cmdline, i.Value) {
-				report(Critical, "Process command line contains a known indicator", i.Value+" — "+i.Note)
-			}
+		for _, m := range s.cat.stringHits(cmdline) {
+			s.emitRule(m.rule, Critical, f, "Process command line contains a known indicator: "+m.rule.Title, m.note)
 		}
 		// Hash what actually runs (/proc/<pid>/exe works even after rm). Skip large system binaries for speed.
 		if temp || deleted || memfd || !strings.HasPrefix(path, "/usr/") {
 			if sum := s.sha256(base + "exe"); sum != "" {
-				if note, ok := s.iocs.sha[sum]; ok {
-					report(Critical, "Process executable matches known malware (SHA256)", sum, note)
+				if m, ok := s.cat.sha[sum]; ok {
+					s.emitRule(m.rule, Critical, f, "Process executable matches known malware (SHA256): "+m.rule.Title, sum, m.note)
 				}
 			}
 		}
@@ -160,16 +152,12 @@ func (s *scanner) processes(allProcs bool, targets []target) {
 				ip, _, _ := net.SplitHostPort(sk.remote)
 				f := Finding{Target: p.target, Kind: "network", PID: owner, Path: p.exe,
 					Evidence: []string{fmt.Sprintf("%s → %s (%s)", sk.local, sk.remote, sk.state)}}
-				if note, ok := s.iocs.ip[ip]; ok {
-					f.Severity, f.Title = Critical, "Connection to a known malicious IP"
-					f.Evidence = append(f.Evidence, note)
-					s.rep.add(f)
-				} else if minerPorts[sk.rport] {
-					f.Severity, f.Title = Medium, fmt.Sprintf("Outbound connection to port %d (common for miners/backdoors)", sk.rport)
-					s.rep.add(f)
+				if m, ok := s.cat.ip[ip]; ok {
+					s.emitRule(m.rule, Critical, f, "Connection to a known malicious IP: "+m.rule.Title, m.note)
+				} else if m, ok := s.cat.ports[sk.rport]; ok {
+					s.emit("MK-NET-PORT", f, fmt.Sprintf("Outbound connection to port %d (%s)", sk.rport, m.note), nil)
 				} else if p.temp {
-					f.Severity, f.Title = High, "Process from a temporary/deleted executable has a network connection"
-					s.rep.add(f)
+					s.emit("MK-NET-SUSPICIOUS", f, "", nil)
 				}
 			}
 		}

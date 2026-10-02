@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ type target struct {
 }
 
 type scanner struct {
-	iocs    *IOCs
+	cat     *Catalog
 	rep     *Report
 	maxSize int64
 	extra   []string
@@ -41,16 +42,16 @@ type scanner struct {
 
 func Main(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
-	var containers, iocFiles, paths multi
+	var containers, ruleDirs, paths multi
 	fs.Var(&containers, "container", "scan this container (name or id); repeatable")
 	allContainers := fs.Bool("all-containers", false, "scan every running container")
 	host := fs.Bool("host", false, "also scan the host when --container/--all-containers is given (default: host only)")
-	fs.Var(&iocFiles, "iocs", "extra indicators file (same JSON shape as the built-in set); repeatable")
+	fs.Var(&ruleDirs, "rules", "extra security catalog directory (rules/*.yaml, vulns/*.json); repeatable, overrides same ids")
 	fs.Var(&paths, "path", "extra directory to scan on every target; repeatable")
 	jsonOut := fs.Bool("json", false, "print the report as JSON")
 	consent := fs.Bool("consent", false, "confirm consent non-interactively (for automation)")
 	maxMB := fs.Int64("max-file-mb", 64, "skip hashing/reading files bigger than this")
-	showIOCs := fs.Bool("list-iocs", false, "print the indicators in use and exit")
+	showRules := fs.Bool("list-rules", false, "print the catalog in use (sources, checks, rules, vulnerabilities) and exit")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `makit scan [options] — read-only malware check (host and/or containers). Reports only; changes nothing.
 
@@ -61,14 +62,18 @@ func Main(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	iocs, err := loadIOCs(iocFiles)
+	cat, err := LoadCatalog(append(CatalogDirs(), ruleDirs...))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "iocs:", err)
+		fmt.Fprintln(os.Stderr, "catalog:", err)
 		return 2
 	}
-	if *showIOCs {
-		b, _ := json.MarshalIndent(iocs, "", "  ")
-		fmt.Println(string(b))
+	if *showRules {
+		if *jsonOut {
+			b, _ := json.MarshalIndent(cat, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			cat.Print(os.Stdout)
+		}
 		return 0
 	}
 
@@ -101,14 +106,14 @@ func Main(args []string) int {
 			op = u.Username
 		}
 	}
-	rep := &Report{Version: Version, Started: time.Now(), Host: hostname, Operator: op}
+	rep := &Report{Version: Version, Started: time.Now(), Host: hostname, Operator: op, Catalog: cat.Sources}
 	for _, t := range targets {
 		rep.Targets = append(rep.Targets, t.name)
 	}
 	if os.Geteuid() != 0 {
 		rep.Notes = append(rep.Notes, "not running as root: other users' processes, sockets and files were not visible — run with sudo for a full scan")
 	}
-	s := &scanner{iocs: iocs, rep: rep, maxSize: *maxMB << 20, extra: paths, hashes: map[string]string{}, contOf: map[string]string{}}
+	s := &scanner{cat: cat, rep: rep, maxSize: *maxMB << 20, extra: paths, hashes: map[string]string{}, contOf: map[string]string{}}
 	if cs, err := docker.Containers(); err == nil {
 		for _, c := range cs {
 			s.contOf[c.ID] = c.Name
@@ -176,4 +181,19 @@ makit will NOT modify, delete, move, quarantine, execute or upload anything. Fin
 	fmt.Fprint(os.Stderr, "Type 'yes' to allow this scan: ")
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	return strings.TrimSpace(strings.ToLower(line)) == "yes"
+}
+
+// CatalogDirs are the default catalog sources, in order: bundled with this makit, then the updated copy.
+// MAKIT_SECURITY (colon-separated) replaces them.
+func CatalogDirs() []string {
+	if v := os.Getenv("MAKIT_SECURITY"); v != "" {
+		return strings.Split(v, ":")
+	}
+	var dirs []string
+	if exe, err := os.Executable(); err == nil { // <prefix>/libexec/makit-core → <prefix>/security
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			dirs = append(dirs, filepath.Join(filepath.Dir(real), "..", "security"))
+		}
+	}
+	return append(dirs, "/var/lib/makit/security")
 }
