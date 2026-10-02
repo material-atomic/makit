@@ -120,5 +120,12 @@ cmd_scan_run() {
     if have jq; then body=$(jq -n --arg t "$summary"$'\n'"report: $out" '{text: $t}'); else body="{\"text\": \"makit scan: findings on $(hostname), see $out\"}"; fi
     curl -fsS -m 20 -X POST -H 'Content-Type: application/json' --data "$body" "$WEBHOOK" >/dev/null || logger -t makit-scan "webhook failed"
   fi
+  # Channels from 'makit notify add …' (Telegram, Slack, Google Chat, Discord, Teams, ntfy, email) get it too.
+  if [[ $worst == alert && -s /etc/makit/notify.yaml ]]; then
+    local level=high
+    if have jq && [[ $(jq '[.findings[] | select(.severity=="CRITICAL")] | length' "$out") -gt 0 ]]; then level=critical; fi
+    printf '%s\nreport: %s\n' "$summary" "$out" | "$MAKIT_CORE" notify send --level "$level" --title "scan findings" --source scan \
+      || logger -t makit-scan "notify failed"
+  fi
   [[ $code -le 1 ]]
 }

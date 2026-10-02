@@ -126,6 +126,29 @@ makit shield log --blocked
 Or put makit in front of Caddy/nginx (it terminates TLS and forwards to localhost). Guide:
 [docs/security/shield.md](docs/security/shield.md).
 
+Every request is also scored (probes, XSS and SQL injection in the URL, scanners, floods — the scoring set is
+[online in this repo](security/scoring/http.yaml) and you can override it per server). Bots, crawlers and AI agents are
+recognised and verified (a fake Googlebot is caught), and you choose per category or per bot:
+
+```bash
+makit shield bots set ai-crawler block      # no AI training crawlers
+makit shield bots set gptbot "limit 30/1m"  # …or let one in slowly
+makit shield customize scoring              # your own copy of the scoring set in /etc/makit/security
+```
+
+Guide: [docs/security/bots.md](docs/security/bots.md).
+
+## makit notify
+
+Alerts for bans and scan findings on Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks or email:
+
+```bash
+makit notify add telegram --name ops --token BOT_TOKEN --chat-id CHAT_ID
+makit notify test
+```
+
+Guide: [docs/security/notifications.md](docs/security/notifications.md).
+
 ## Safety
 
 - **No lock-out.** `makit ssh` only disables passwords when root has a key in `/root/.ssh/authorized_keys`, validates
