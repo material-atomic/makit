@@ -26,4 +26,5 @@ curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/$tag/install.
 Source tarball SHA256 (\`MAKIT_SHA256\`): \`$tarsum\`
 Source tarball and makit-core binaries: \`SHA256SUMS\` (verified by install.sh)."
 echo "released $tag"
-echo "next: add makit.sh/$tag/install.sh on the website (RunSnip project makit.sh), a pinned copy of the previous one"
+echo "next: on the website (RunSnip project makit.sh) add $tag/install.sh (a pinned copy of the previous one) and"
+echo "      replace llms-full.txt with the output of scripts/llms-full.sh"
