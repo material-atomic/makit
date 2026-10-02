@@ -32,6 +32,7 @@ type Agent struct {
 	UA       string            `yaml:"ua" json:"-"`
 	Header   map[string]string `yaml:"header" json:"-"` // lower-case header → regexp (e.g. signature-agent)
 	Robots   string            `yaml:"robots" json:"robots,omitempty"`
+	Action   string            `yaml:"action" json:"action,omitempty"` // the catalog's default for this agent (over its category's)
 	URL      string            `yaml:"url" json:"url,omitempty"`
 	Verify   struct {
 		RDNS   []string `yaml:"rdns" json:"rdns,omitempty"`
@@ -219,6 +220,13 @@ func LoadBotsConfig(dirs []string, cfg BotsConfig) (*BotCatalog, error) {
 	}
 	if err := set("spoofed", firstNonEmpty(bc.Spoofed, "block"), "spoofed"); err != nil {
 		return nil, err
+	}
+	for _, a := range bc.Agents {
+		if a.Action != "" {
+			if err := set(a.ID, a.Action, "agent"); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for k, v := range cfg.Policy {
 		if _, isCat := bc.Categories[k]; !isCat && k != "spoofed" && bc.byID[k] == nil {
@@ -448,6 +456,9 @@ func (v *Verifier) store(key, st string, at time.Time) {
 func (v *Verifier) rdns(a *Agent, ip netip.Addr) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	if v.LookupAddr == nil { // verification by DNS switched off
+		return "unknown"
+	}
 	names, err := v.LookupAddr(ctx, ip.String())
 	if err != nil {
 		var de *net.DNSError

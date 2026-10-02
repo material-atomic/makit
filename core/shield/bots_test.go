@@ -201,6 +201,27 @@ func TestDecideBots(t *testing.T) {
 	}
 }
 
+// GoesBot and goes.vn webhooks are let through by default — with no Accept-Language and a non-browser UA they would
+// otherwise look like scripts — but a maintainer can still block them, and they get no rule/score bypass (unverified).
+func TestGoesBotAllowedByDefault(t *testing.T) {
+	p := botPolicy(t, map[string]string{"seo": "block", "library": "block"})
+	p.BotScore.Actions["suspect"], p.BotScore.Actions["likely"] = "block", "block"
+	for _, ua := range []string{"GoesBot/1.0 (+https://goes.vn/bot)", chromeUA + " GoesBot/1.0 (+https://goes.vn/bot)", "Goes-Webhooks/1.0 (+https://goes.vn)"} {
+		d := p.Decide(Request{Peer: "198.51.100.9", UA: ua, Method: "GET", URI: "/", Headers: map[string]string{}})
+		if !d.Allow || d.Bot == nil || d.Bot.Action != "allow" {
+			t.Errorf("%s: %+v %+v", ua, d, d.Bot)
+		}
+	}
+	d := p.Decide(Request{Peer: "198.51.100.9", UA: "GoesBot/1.0", Method: "GET", URI: "/.env"})
+	if d.Allow {
+		t.Error("a GoesBot User-Agent bypassed the rules (anyone can send it)")
+	}
+	blocked := botPolicy(t, map[string]string{"goesbot": "block"})
+	if d := blocked.Decide(Request{Peer: "198.51.100.9", UA: "GoesBot/1.0", Method: "GET", URI: "/"}); d.Allow {
+		t.Error("bots set goesbot block ignored")
+	}
+}
+
 func TestBotPolicyValidation(t *testing.T) {
 	for _, bad := range []map[string]string{{"ai-crawlr": "block"}, {"gptbot": "kick"}, {"spoofed": "ban forever"}} {
 		if _, err := LoadBots([]string{repoCatalog}, "", bad); err == nil {

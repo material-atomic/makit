@@ -9,6 +9,7 @@
 # Agents without verify are "claimed": anyone can send that User-Agent, so allow never skips scoring for them.
 #
 # Actions: allow | log | block | ban <duration> | limit <N>/<window>  (e.g. limit 60/1m, per agent across all IPs)
+# An agent may carry its own default action (action:), which wins over its category's; your policy wins over both.
 # Guide: docs/security/bots.md
 schema: 1
 id: MK-BOTS
@@ -27,6 +28,7 @@ categories:
   archive:      {label: "Web archive", action: log}
   library:      {label: "HTTP library or command-line tool", action: log}
   headless:     {label: "Headless browser", action: log}
+  webhook:      {label: "Webhook delivery from a service you use", action: allow}
   other-bot:    {label: "Other self-declared bot", action: log}
 spoofed: block   # pretends to be a verifiable bot (fake Googlebot…)
 
@@ -102,6 +104,11 @@ agents:
   - {id: signed-agent, name: Signed agent (Web Bot Auth), category: ai-agent, header: {signature-agent: '.'}}
 
   # ── SEO ──
+  # GoesBot (goes.vn, the SEO platform behind makit): only visits a site a goes.vn user asked to check; plain fetches
+  # send "GoesBot/1.0 (+https://goes.vn/bot)", browser checks (screenshots, Lighthouse) append it to Chrome's UA.
+  # Allowed by default so goes.vn's checks of your own sites keep working; block it with `bots set goesbot block`.
+  - {id: goesbot, name: GoesBot, operator: goes.vn, category: seo, robots: GoesBot, ua: 'GoesBot/', action: allow,
+     url: https://goes.vn/bot}
   - {id: ahrefsbot, name: AhrefsBot, operator: Ahrefs, category: seo, robots: AhrefsBot, ua: 'AhrefsBot|AhrefsSiteAudit'}
   - {id: semrushbot, name: SemrushBot, operator: Semrush, category: seo, robots: SemrushBot, ua: 'SemrushBot|SiteAuditBot'}
   - {id: mj12bot, name: MJ12bot, operator: Majestic, category: seo, robots: MJ12bot, ua: 'MJ12bot'}
@@ -137,6 +144,9 @@ agents:
   - {id: inoreader, name: Inoreader, category: feed, ua: 'Inoreader'}
   - {id: newsblur, name: NewsBlur, category: feed, ua: 'NewsBlur'}
   - {id: internet-archive, name: Internet Archive, category: archive, robots: ia_archiver, ua: 'ia_archiver|archive\.org_bot'}
+
+  # ── webhooks ──
+  - {id: goes-webhooks, name: goes.vn webhooks, operator: goes.vn, category: webhook, ua: '^Goes-Webhooks/', url: https://goes.vn}
 
   # ── libraries and tools (scripts; also what most scanners use) ──
   - {id: curl, name: curl, category: library, ua: '^curl/'}
