@@ -14,6 +14,10 @@ for img in ubuntu:24.04 debian:12; do
     $m base >/dev/null && echo "base: ok"
     $m --dry-run system-upgrade --full --autoremove > /tmp/u; tail -3 /tmp/u
     $m rules path
+    $m docs > /tmp/d; grep -c "^  " /tmp/d
+    $m docs MK-SSH-PASSWORD > /tmp/d; head -1 /tmp/d
+    $m --dry-run harden > /tmp/h 2>&1; grep -c "▶" /tmp/h
+    $m --dry-run firewall --docker --egress 443/tcp > /tmp/f 2>&1; grep -c "MAKIT-EGRESS" /tmp/f
     $m upgrade --check || echo "upgrade --check exit=$?"
     $m sysctl opensearch vm.swappiness=10 2>&1 | tail -2
     grep -c "" /etc/sysctl.d/90-makit.conf

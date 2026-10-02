@@ -18,7 +18,8 @@ makit init
 ```
 
 `makit init` runs, in order: system upgrade and base packages → swap → kernel settings → Docker → (optional)
-block-storage volume → firewall → automatic security updates → key-only SSH. Every step checks what is
+block-storage volume → firewall (with Docker-published ports behind ufw) → automatic security updates → hardening
+(kernel, /dev/shm, fail2ban, AppArmor, auditd) → key-only SSH. Every step checks what is
 already done, so running it again is harmless. Every command accepts `--dry-run`.
 
 ## Commands
@@ -32,14 +33,17 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | `makit sysctl KEY=VALUE… \| opensearch` | Persists kernel settings in `/etc/sysctl.d/90-makit.conf` and applies them. `opensearch` = `vm.max_map_count=262144`. |
 | `makit docker` | Docker Engine + Compose plugin from download.docker.com; caps container logs at 3 × 20 MB (only if `/etc/docker/daemon.json` does not exist yet). |
 | `makit volume DEVICE\|auto MOUNTPOINT [--docker] [--format]` | Mounts a block-storage volume (DigitalOcean, Hetzner, GCP, AWS EBS) by UUID with `nofail`. `--docker` keeps Docker's named volumes on it and makes Docker wait for the mount. `--format` creates ext4 only on an empty device, after asking. |
-| `makit firewall [PORT/PROTO…]` | ufw: deny incoming except the given ports (default 22/tcp 80/tcp 443/tcp 443/udp) **plus every port sshd listens on**. Existing rules are kept. |
+| `makit firewall [PORT/PROTO…] [--docker] [--egress PORTS\|off]` | ufw: deny incoming except the given ports (default 22/tcp 80/tcp 443/tcp 443/udp) **plus every port sshd listens on**; existing rules are kept. `--docker` puts Docker-published ports behind ufw; `--egress "443/tcp"` lets containers connect out only to those ports (+ DNS). |
 | `makit updates` | Unattended security upgrades (reboots stay manual). |
+| `makit harden [--tmp-noexec]` | Kernel hardening sysctls, `/dev/shm` noexec, SSH limits, fail2ban sshd jail, AppArmor, auditd rules for programs run from temporary directories. |
 | `makit ssh` | Disables SSH password login, root keeps key login. **Skipped if root has no authorized key.** |
 | `makit status` | Read-only summary: RAM, swap, disks, Docker, firewall, SSH, kernel settings, pending reboot. |
 | `makit list [--json]` | Each part makit manages and whether it is in place (the Setup tab uses this). |
 | `makit top` | Terminal dashboard with mouse support — see below. |
 | `makit scan [options]` | Read-only security check of the host and/or containers — see below. |
 | `makit rules list\|update\|path` | The security catalog `scan` uses; `update` fetches the newest one from this repository. |
+| `makit schedule scan daily\|weekly\|hourly\|off [--webhook=URL]` | Scheduled read-only scans (systemd timer) with a webhook alert when something MEDIUM or worse is found. Consent is asked once. |
+| `makit docs [topic\|RULE-ID]` | The [security guides](docs/security/README.md), offline: what each finding means and how to fix it. |
 | `makit upgrade [--check] [vX.Y.Z]` | Checks GitHub for a newer makit and installs it after asking (`--check` only reports: exit 10 when an update exists). `self-update` is an alias. |
 | `makit version`, `makit -v`, `makit --version` | Prints the installed version. |
 
@@ -82,7 +86,7 @@ makit scan --json --consent > report.json   # automation: --consent replaces the
 Before anything is read, makit lists what it will look at and asks you to type `yes`. **It never modifies, deletes,
 moves, quarantines, executes or uploads anything** — it prints findings with evidence and suggested next steps.
 
-What it looks for:
+What it looks for (every finding links its [guide](docs/security/README.md); `makit docs <rule>` shows it offline):
 
 - **Processes** running a deleted executable (run-then-`rm`), from `/tmp`, `/dev/shm` or a hidden directory, from memory
   only (memfd), disguised as kernel threads (`[kworker/0:1]`) or named like a system tool they are not.
@@ -91,7 +95,12 @@ What it looks for:
   Go binaries with backdoor traits (HTTP + SOCKS5 + TLS/ChaCha20), downloader scripts (`wget … -O /tmp/…; chmod +x;
   nohup`); in containers, every file added or changed since the image (`docker diff`).
 - **Persistence**: cron, systemd units, `rc.local`, `/etc/ld.so.preload`, shell profiles, recently changed SSH keys.
-- **Entry points**: installed Next.js / React Server Components versions vulnerable to CVE-2025-55182.
+- **Entry points**: installed packages affected by advisories in the catalog (e.g. Next.js / React for CVE-2025-55182).
+- **Configuration**: SSH password login, firewall, databases/admin ports reachable from the internet, Docker ports
+  bypassing ufw, containers that are privileged / have the Docker socket / run as root / have an executable `/tmp`,
+  pending security updates, kernel settings, `/dev/shm`, fail2ban, AppArmor, auditd, log shipping, `.env` permissions.
+
+`makit scan --only malware|posture|vulns` runs a subset.
 
 Everything it knows — indicators, patterns, severities, vulnerabilities (OSV format) — is data in
 [`security/`](security/README.md), read from the bundled catalog, the newest one from this repository

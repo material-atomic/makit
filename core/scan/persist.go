@@ -82,7 +82,7 @@ func (s *scanner) persistence(t target) {
 				sev = Low
 			}
 		}
-		s.rep.add(Finding{Severity: sev, Rule: "MK-PERSIST-SSH-KEYS", Target: t.name, Kind: "persistence", Path: strings.TrimPrefix(k, strings.TrimSuffix(t.root, "/")), Title: title,
+		s.rep.add(Finding{Severity: sev, Rule: "MK-PERSIST-SSH-KEYS", Doc: docURL(s.cat.Checks["MK-PERSIST-SSH-KEYS"].Doc), Target: t.name, Kind: "persistence", Path: strings.TrimPrefix(k, strings.TrimSuffix(t.root, "/")), Title: title,
 			Evidence: []string{strings.Join(append([]string{itoa(n) + " key(s)"}, names...), ", "), "modified " + st.ModTime().Format("2006-01-02 15:04")}})
 	}
 }

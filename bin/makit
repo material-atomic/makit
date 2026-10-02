@@ -26,14 +26,17 @@ Commands:
   sysctl      Persist kernel settings       (makit sysctl KEY=VALUE… | opensearch)
   docker      Install Docker Engine + Compose, cap container logs
   volume      Mount a block-storage volume  (makit volume DEVICE|auto MOUNTPOINT [--docker] [--format])
-  firewall    Allow only the given ports    (makit firewall [PORT/PROTO…])
+  firewall    Allow only the given ports    (makit firewall [PORT/PROTO…] [--docker] [--egress PORTS])
   updates     Enable automatic security updates
+  harden      Kernel settings, /dev/shm noexec, SSH limits, fail2ban, AppArmor, auditd
   ssh         Disable SSH password login (only if a key is installed)
   status      Show what makit manages on this machine
   list        Each managed part and whether it is in place (--json for tools)
   top         Terminal dashboard: system, processes, containers, services, logs, setup
   scan        Read-only security check of the host or containers (asks for consent first)
   rules       The security catalog scan uses (makit rules list|update|path)
+  schedule    Scheduled scans with alerts (makit schedule scan daily --webhook=URL)
+  docs        Security guides: what each finding means and how to fix it (makit docs ssh)
   upgrade     Check for a newer makit and install it (makit upgrade [--check] [vX.Y.Z])
   version     Print the version
 

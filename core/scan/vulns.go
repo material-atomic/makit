@@ -213,7 +213,7 @@ func (s *scanner) checkNodeModules(t target, nm string) {
 				}
 			}
 			ids := append([]string{vu.ID}, vu.Aliases...)
-			s.rep.add(Finding{Severity: sev, Target: t.name, Kind: "package", Rule: "MK-VULN", Refs: ids,
+			s.rep.add(Finding{Severity: sev, Target: t.name, Kind: "package", Rule: "MK-VULN", Refs: ids, Doc: docURL(s.cat.Checks["MK-VULN"].Doc),
 				Path:  strings.TrimPrefix(pj, strings.TrimSuffix(t.root, "/")),
 				Title: fmt.Sprintf("%s %s is affected by %s", name, v, strings.Join(ids, " / ")), Evidence: ev})
 		}

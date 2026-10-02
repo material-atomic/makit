@@ -9,6 +9,9 @@ COMPONENTS=(
   "firewall|Firewall|firewall|ufw: only SSH, HTTP and HTTPS open"
   "updates|Security updates|updates|Unattended security upgrades"
   "ssh|SSH key-only|ssh|Password login disabled (needs a key for root)"
+  "harden|Server hardening|harden|Kernel settings, /dev/shm noexec, SSH limits, fail2ban, AppArmor, auditd"
+  "dockerfw|Docker firewall|firewall --docker|Published container ports follow ufw"
+  "schedule|Scheduled security scan|schedule scan daily --consent|Daily read-only makit scan with alerts"
   "opensearch|OpenSearch kernel setting|sysctl opensearch|vm.max_map_count = 262144 (OpenSearch/Elasticsearch)"
 )
 
@@ -42,6 +45,22 @@ check_component() {
     opensearch)
       n=$(sysctl -n vm.max_map_count 2>/dev/null || echo 0)
       if [[ $n -ge 262144 ]]; then echo "ok|$n"; else echo "missing|$n (needs 262144)"; fi ;;
+    harden)
+      local miss=()
+      [[ $(sysctl -n kernel.kptr_restrict 2>/dev/null || echo 0) -ge 1 ]] || miss+=(kernel)
+      grep -qE '^[^ ]+ /dev/shm [^ ]+ [^ ]*noexec' /proc/mounts || miss+=(/dev/shm)
+      { ! have sshd || pgrep -x fail2ban-server >/dev/null; } || miss+=(fail2ban)
+      pgrep -x auditd >/dev/null || miss+=(auditd)
+      if [[ ${#miss[@]} -eq 0 ]]; then echo "ok|hardened"; else echo "missing|not done: ${miss[*]}"; fi ;;
+    dockerfw)
+      if ! have docker; then echo "ok|no Docker"
+      elif grep -qs '^# BEGIN makit docker' /etc/ufw/after.rules; then
+        local eg; eg=$(sed -n 's/^# makit egress: //p' /etc/ufw/after.rules | head -1)
+        echo "ok|on${eg:+, egress: $eg}"
+      else echo "missing|published ports bypass ufw"; fi ;;
+    schedule)
+      if systemctl is-enabled --quiet makit-scan.timer 2>/dev/null; then echo "ok|$(sed -n 's/^schedule=//p' /etc/makit/scan-consent 2>/dev/null)"
+      else echo "missing|not scheduled"; fi ;;
     *) echo "missing|unknown component" ;;
   esac
 }

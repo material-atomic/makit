@@ -1,24 +1,54 @@
-# Built-in checks (logic lives in makit-core). This file sets their severity and lets a catalog turn one off.
-# Severities: info, low, medium, high, critical.
+# Built-in checks (logic lives in makit-core). This file sets their severity, title and documentation page, and lets
+# a catalog turn one off (disabled: true). Severities: info, low, medium, high, critical.
+# doc: path in the makit repository; findings link to it for the running version (or `makit docs <topic>`).
 checks:
-  MK-PROC-DELETED-TEMP:  { severity: critical, title: "Process runs a deleted executable from a temporary/hidden path (run-then-rm dropper)" }
-  MK-PROC-DELETED:       { severity: low,      title: "Process runs an executable that was replaced or deleted (often an update: restart it)" }
-  MK-PROC-MEMFD:         { severity: medium,   title: "Process runs from memory only (memfd, no file on disk)" }
-  MK-PROC-TEMP:          { severity: high,     title: "Process runs from a temporary or hidden directory" }
-  MK-PROC-KTHREAD:       { severity: high,     title: "User process disguised as a kernel thread" }
-  MK-PROC-NAME-MISMATCH: { severity: high,     title: "Process name does not match its executable" }
-  MK-PROC-IOC:           { severity: critical, title: "Process matches a known indicator (path, hash or command line)" }
-  MK-NET-IOC:            { severity: critical, title: "Connection to a known malicious IP" }
-  MK-NET-PORT:           { severity: medium,   title: "Outbound connection to a port used by miners/backdoors" }
-  MK-NET-SUSPICIOUS:     { severity: high,     title: "Process from a temporary/deleted executable has a network connection" }
-  MK-FILE-IOC:           { severity: critical, title: "File matches a known indicator (hash or path)" }
-  MK-FILE-EXEC-TEMP:     { severity: medium,   title: "Executable in a temporary directory" }
-  MK-FILE-EXEC-ADDED:    { severity: medium,   title: "Executable added to the container after it started" }
-  MK-FILE-EXEC-HIDDEN:   { severity: high,     title: "Executable hidden in a dot-directory/dot-file" }
-  MK-FILE-GO-TRAITS:     { severity: high,     title: "Go binary with HTTP + SOCKS5 + TLS/ChaCha20 (backdoor traits) in a suspicious place" }
-  MK-FILE-SYSTEM-NAME:   { severity: high,     title: "Executable named like a system tool outside system directories" }
-  MK-PERSIST-TEMP-EXEC:  { severity: high,     title: "Start-up entry runs a program from a temporary or hidden path" }
-  MK-PERSIST-RECENT:     { severity: info,     title: "Start-up entry changed in the last 7 days (review)" }
-  MK-PERSIST-PRELOAD:    { severity: high,     title: "Libraries are force-loaded into every process (/etc/ld.so.preload)" }
-  MK-PERSIST-SSH-KEYS:   { severity: info,     title: "Authorized SSH keys (low when changed in the last 7 days)" }
-  MK-VULN:               { severity: high,     title: "Installed package is affected by a known vulnerability (severity from the advisory)" }
+  # --- malware on a running system (docs/security/malware.md, persistence.md)
+  MK-PROC-DELETED-TEMP:  { severity: critical, doc: docs/security/malware.md#processes, title: "Process runs a deleted executable from a temporary/hidden path (run-then-rm dropper)" }
+  MK-PROC-DELETED:       { severity: low,      doc: docs/security/malware.md#processes, title: "Process runs an executable that was replaced or deleted (often an update: restart it)" }
+  MK-PROC-MEMFD:         { severity: medium,   doc: docs/security/malware.md#processes, title: "Process runs from memory only (memfd, no file on disk)" }
+  MK-PROC-TEMP:          { severity: high,     doc: docs/security/malware.md#processes, title: "Process runs from a temporary or hidden directory" }
+  MK-PROC-KTHREAD:       { severity: high,     doc: docs/security/malware.md#processes, title: "User process disguised as a kernel thread" }
+  MK-PROC-NAME-MISMATCH: { severity: high,     doc: docs/security/malware.md#processes, title: "Process name does not match its executable" }
+  MK-PROC-IOC:           { severity: critical, doc: docs/security/malware.md#indicators-from-the-catalog, title: "Process matches a known indicator (path, hash or command line)" }
+  MK-NET-IOC:            { severity: critical, doc: docs/security/malware.md#network, title: "Connection to a known malicious IP" }
+  MK-NET-PORT:           { severity: medium,   doc: docs/security/malware.md#network, title: "Outbound connection to a port used by miners/backdoors" }
+  MK-NET-SUSPICIOUS:     { severity: high,     doc: docs/security/malware.md#network, title: "Process from a temporary/deleted executable has a network connection" }
+  MK-FILE-IOC:           { severity: critical, doc: docs/security/malware.md#indicators-from-the-catalog, title: "File matches a known indicator (hash or path)" }
+  MK-FILE-EXEC-TEMP:     { severity: medium,   doc: docs/security/malware.md#files, title: "Executable in a temporary directory" }
+  MK-FILE-EXEC-ADDED:    { severity: medium,   doc: docs/security/malware.md#files, title: "Executable added to the container after it started" }
+  MK-FILE-EXEC-HIDDEN:   { severity: high,     doc: docs/security/malware.md#files, title: "Executable hidden in a dot-directory/dot-file" }
+  MK-FILE-GO-TRAITS:     { severity: high,     doc: docs/security/malware.md#files, title: "Go binary with HTTP + SOCKS5 + TLS/ChaCha20 (backdoor traits) in a suspicious place" }
+  MK-FILE-SYSTEM-NAME:   { severity: high,     doc: docs/security/malware.md#files, title: "Executable named like a system tool outside system directories" }
+  MK-PERSIST-TEMP-EXEC:  { severity: high,     doc: docs/security/persistence.md, title: "Start-up entry runs a program from a temporary or hidden path" }
+  MK-PERSIST-RECENT:     { severity: info,     doc: docs/security/persistence.md, title: "Start-up entry changed in the last 7 days (review)" }
+  MK-PERSIST-PRELOAD:    { severity: high,     doc: docs/security/persistence.md, title: "Libraries are force-loaded into every process (/etc/ld.so.preload)" }
+  MK-PERSIST-SSH-KEYS:   { severity: info,     doc: docs/security/ssh.md, title: "Authorized SSH keys (low when changed in the last 7 days)" }
+  MK-VULN:               { severity: high,     doc: docs/security/dependencies.md, title: "Installed package is affected by a known vulnerability (severity from the advisory)" }
+
+  # --- configuration (posture)
+  MK-SSH-PASSWORD:       { severity: high,     doc: docs/security/ssh.md, title: "SSH accepts passwords" }
+  MK-SSH-ROOT-PASSWORD:  { severity: high,     doc: docs/security/ssh.md, title: "Root can log in over SSH with a password" }
+  MK-SSH-WEAK-SETTINGS:  { severity: low,      doc: docs/security/ssh.md, title: "SSH allows many auth tries, a long grace time or X11 forwarding" }
+  MK-FW-INACTIVE:        { severity: medium,   doc: docs/security/firewall.md, title: "No active firewall" }
+  MK-NET-PUBLIC-SERVICE: { severity: high,     doc: docs/security/docker-ports.md, title: "Internal service reachable on all interfaces" }
+  MK-DOCKER-UFW:         { severity: medium,   doc: docs/security/docker-ports.md, title: "Docker-published ports bypass the firewall (DOCKER-USER chain is empty)" }
+  MK-EGRESS-OPEN:        { severity: info,     doc: docs/security/egress.md, title: "Containers may connect anywhere (no egress policy)" }
+  MK-DOCKER-PRIVILEGED:  { severity: critical, doc: docs/security/containers.md, title: "Container runs privileged" }
+  MK-DOCKER-SOCK:        { severity: critical, doc: docs/security/containers.md, title: "Container has the Docker socket (root on the host)" }
+  MK-DOCKER-HOST-NS:     { severity: high,     doc: docs/security/containers.md, title: "Container shares the host network or PID namespace" }
+  MK-DOCKER-CAPS:        { severity: high,     doc: docs/security/containers.md, title: "Container has dangerous capabilities" }
+  MK-DOCKER-ROOT:        { severity: medium,   doc: docs/security/containers.md, title: "Container's main process runs as root" }
+  MK-DOCKER-TMP-EXEC:    { severity: medium,   doc: docs/security/containers.md, title: "Container /tmp is writable and executable" }
+  MK-DOCKER-NO-NEW-PRIVS: { severity: low,     doc: docs/security/containers.md, title: "Container without no-new-privileges" }
+  MK-DOCKER-RW-ROOT:     { severity: info,     doc: docs/security/containers.md, title: "Container root filesystem is writable" }
+  MK-UPDATES-AUTO-OFF:   { severity: medium,   doc: docs/security/updates.md, title: "Automatic security updates are off" }
+  MK-UPDATES-PENDING:    { severity: medium,   doc: docs/security/updates.md, title: "Security updates are waiting to be installed" }
+  MK-UPDATES-REBOOT:     { severity: low,      doc: docs/security/updates.md, title: "A reboot is required to finish updates" }
+  MK-KERNEL-SYSCTL:      { severity: low,      doc: docs/security/kernel.md, title: "Kernel hardening settings missing" }
+  MK-HOST-TMP-EXEC:      { severity: low,      doc: docs/security/mounts.md, title: "Temporary directory allows executing files" }
+  MK-F2B-INACTIVE:       { severity: medium,   doc: docs/security/fail2ban.md, title: "fail2ban is not running" }
+  MK-F2B-NO-SSHD:        { severity: low,      doc: docs/security/fail2ban.md, title: "fail2ban has no sshd jail" }
+  MK-APPARMOR-OFF:       { severity: low,      doc: docs/security/apparmor.md, title: "AppArmor is not enabled" }
+  MK-SECRET-PERMS:       { severity: medium,   doc: docs/security/secrets.md, title: "Secret file readable by other users" }
+  MK-LOG-AUDITD:         { severity: low,      doc: docs/security/logging.md, title: "No audit trail of executed programs (auditd not running)" }
+  MK-LOG-REMOTE:         { severity: info,     doc: docs/security/logging.md, title: "Logs are not shipped off the server" }

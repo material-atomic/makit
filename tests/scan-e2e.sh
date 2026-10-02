@@ -11,7 +11,8 @@ case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; *) arch=arm64 ;; esac
 [[ -x dist/makit-core-linux-$arch ]] || scripts/build.sh >/dev/null
 bin="$PWD/dist/makit-core-linux-$arch"
 victim=makit-e2e-victim
-cleanup() { docker rm -f "$victim" >/dev/null 2>&1 || true; }
+bad=makit-e2e-misconfigured
+cleanup() { docker rm -f "$victim" "$bad" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
 
@@ -24,6 +25,9 @@ docker run -d --name "$victim" -w /app -v "$bin:/seed/gobin:ro" debian:12 bash -
   (exec -a "[kworker/0:1]" /tmp/vim 3600 >/dev/null 2>&1 &)
   sleep 1; rm -f /tmp/vim
   exec sleep infinity' >/dev/null
+# A container with the configuration mistakes posture checks look for (it only sleeps).
+docker run -d --name "$bad" --privileged -v /var/run/docker.sock:/var/run/docker.sock -p 0.0.0.0:15432:5432 \
+  debian:12 sleep infinity >/dev/null
 sleep 3
 
 scan() {
@@ -40,7 +44,7 @@ set +e; scan --container "$victim" </dev/null >/dev/null 2>&1; code=$?; set -e
 check "refuses to scan without consent (exit 3)" '[[ $code -eq 3 ]]'
 
 echo "detections"
-set +e; report=$(scan --container "$victim" --consent --json 2>/dev/null); code=$?; set -e
+set +e; report=$(scan --container "$victim" --container "$bad" --consent --json 2>/dev/null); code=$?; set -e
 check "exit 1 when MEDIUM or worse is found" '[[ $code -eq 1 ]]'
 has() { python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if any(f["rule"]==sys.argv[1] and f["path"]==sys.argv[2] and f["severity"]==sys.argv[3] for f in r["findings"]) else 1)' "$@" <<<"$report"; }
 check "deleted /tmp/vim still running → CRITICAL"             'has MK-PROC-DELETED-TEMP /tmp/vim CRITICAL'
@@ -50,6 +54,14 @@ check "hidden Go network binary /tmp/.x/kworker → HIGH"       'has MK-FILE-EXE
 check "dropper cron job → HIGH"                               'has MK-DROPPER /etc/cron.d/sysupdate HIGH'
 check "cron runs from /tmp → HIGH"                            'has MK-PERSIST-TEMP-EXEC /etc/cron.d/sysupdate HIGH'
 check "next 16.0.4 affected by CVE-2025-55182 → CRITICAL"     'has MK-VULN /app/node_modules/next/package.json CRITICAL'
+hasT() { python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if any(f["rule"]==sys.argv[1] and f["target"]==sys.argv[2] and f["severity"]==sys.argv[3] for f in r["findings"]) else 1)' "$@" <<<"$report"; }
+echo "container configuration"
+check "privileged container → CRITICAL"                       'hasT MK-DOCKER-PRIVILEGED container:$bad CRITICAL'
+check "docker.sock mounted → CRITICAL"                        'hasT MK-DOCKER-SOCK container:$bad CRITICAL'
+check "Postgres port published on 0.0.0.0 → HIGH"             'hasT MK-NET-PUBLIC-SERVICE container:$bad HIGH'
+check "main process runs as root → MEDIUM"                    'hasT MK-DOCKER-ROOT container:$bad MEDIUM'
+check "/tmp writable and executable → MEDIUM"                 'hasT MK-DOCKER-TMP-EXEC container:$bad MEDIUM'
+check "every finding links its documentation" 'python3 -c "import json,sys; f=json.load(sys.stdin)[\"findings\"]; sys.exit(0 if f and all(\"/docs/security/\" in x.get(\"doc\",\"\") for x in f) else 1)" <<<"$report"'
 check "report lists the catalog used" 'python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)[\"catalog\"] else 1)" <<<"$report"'
 
 echo "read-only"

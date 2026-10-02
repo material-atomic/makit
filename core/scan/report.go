@@ -35,6 +35,7 @@ type Finding struct {
 	Path     string   `json:"path,omitempty"`
 	PID      int      `json:"pid,omitempty"`
 	Evidence []string `json:"evidence,omitempty"`
+	Doc      string   `json:"doc,omitempty"` // documentation page for this rule
 }
 
 type Report struct {
@@ -121,6 +122,9 @@ func (r *Report) Print(w io.Writer, color bool) {
 		}
 		for _, e := range f.Evidence {
 			fmt.Fprintf(w, "    · %s\n", e)
+		}
+		if f.Doc != "" {
+			fmt.Fprintf(w, "    → %s\n", f.Doc)
 		}
 	}
 	for _, n := range r.Notes {

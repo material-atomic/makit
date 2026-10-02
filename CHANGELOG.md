@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.4.0
+- Security guides in `docs/security/` (one page per topic); every finding links its page for the running version,
+  and `makit docs <topic|RULE-ID>` shows it offline.
+- `makit scan` checks configuration too (posture): SSH, firewall, exposed services, Docker vs ufw, egress, container
+  privileges/socket/root/tmp, updates, kernel, mounts, fail2ban, AppArmor, auditd, log shipping, secret permissions.
+  `--only malware,posture,vulns`.
+- `makit harden`: kernel sysctls, /dev/shm noexec (`--tmp-noexec` for /tmp), SSH limits, fail2ban sshd jail,
+  AppArmor, auditd rules. Part of `makit init` (`--no-harden` to skip).
+- `makit firewall --docker` (published container ports follow ufw) and `--egress PORTS` (containers may connect out
+  only to those ports); `makit init` enables `--docker` when Docker is installed.
+- `makit schedule scan daily|weekly|hourly|off [--webhook=URL]`: scheduled scans, reports in /var/log/makit/scans,
+  webhook alerts; consent recorded once.
+- Catalog: new React2Shell sample hash; `doc` field on checks and rules.
+- Setup tab: server hardening, Docker firewall, scheduled scan.
+- Tests: posture and documentation-link tests; e2e covers a misconfigured container; CI proves the egress policy on
+  real VMs (HTTPS passes, HTTP is rejected) and runs a scheduled scan.
+
 ## v0.3.0
 - Security catalog in `security/`: built-in check severities, detection rules (YAML) and vulnerabilities (OSV JSON),
   read from the bundled copy, the newest one from this repository (`makit rules update`) and `--rules DIR`.

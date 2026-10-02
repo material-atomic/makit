@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck
         run: |
-          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash \
+          docker run --rm -e LC_ALL=C.UTF-8 -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -s bash \
             bin/makit lib/common.sh lib/cmd/*.sh install.sh tests/*.sh scripts/*.sh
 
   go:
@@ -75,6 +75,19 @@ jobs:
         run: sudo makit init --sysctl opensearch --no-ssh-harden
       - name: makit init again (must be harmless)
         run: sudo makit init --sysctl opensearch --no-ssh-harden
+      - name: containers may only use HTTPS (+ DNS) to the internet
+        run: |
+          sudo makit firewall --docker --egress "443/tcp"
+          code=$(docker run --rm curlimages/curl -sS -m 15 -o /dev/null -w '%{http_code}' https://example.com)
+          echo "https: $code"; test "$code" = 200
+          if docker run --rm curlimages/curl -sS -m 10 -o /dev/null http://example.com; then echo "http was not blocked"; exit 1; fi
+          sudo journalctl -k --no-pager | grep -m3 'makit egress'
+      - name: scheduled scan runs and writes a report
+        run: |
+          sudo makit schedule scan daily --consent
+          sudo systemctl start makit-scan.service
+          sudo ls /var/log/makit/scans/ | grep -q '^scan-.*\.json$'
+          sudo makit schedule status
       - name: every part in place
         run: |
           sudo makit list

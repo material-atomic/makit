@@ -1,5 +1,6 @@
 id: MK-NET
 title: Suspicious outbound ports
+doc: docs/security/malware.md#network
 ports:
   - { value: 3333, note: stratum mining }
   - { value: 4444, note: mining / reverse shells }

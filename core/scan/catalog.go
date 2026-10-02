@@ -39,6 +39,7 @@ type Rule struct {
 	Severity   string   `yaml:"severity" json:"severity,omitempty"`
 	Refs       []string `yaml:"refs" json:"refs,omitempty"`
 	Sources    []string `yaml:"sources" json:"sources,omitempty"`
+	Doc        string   `yaml:"doc" json:"doc,omitempty"`
 	Indicators struct {
 		SHA256  []Indicator `yaml:"sha256" json:"sha256,omitempty"`
 		IPs     []Indicator `yaml:"ips" json:"ips,omitempty"`
@@ -55,6 +56,7 @@ type Rule struct {
 type Check struct {
 	Severity string `yaml:"severity" json:"severity"`
 	Title    string `yaml:"title" json:"title"`
+	Doc      string `yaml:"doc" json:"doc,omitempty"`
 	Disabled bool   `yaml:"disabled" json:"disabled,omitempty"`
 }
 
@@ -205,6 +207,13 @@ var builtinDefaults = map[string]Severity{
 	"MK-NET-PORT": Medium, "MK-NET-SUSPICIOUS": High, "MK-FILE-IOC": Critical, "MK-FILE-EXEC-TEMP": Medium,
 	"MK-FILE-EXEC-ADDED": Medium, "MK-FILE-EXEC-HIDDEN": High, "MK-FILE-GO-TRAITS": High, "MK-FILE-SYSTEM-NAME": High,
 	"MK-PERSIST-TEMP-EXEC": High, "MK-PERSIST-RECENT": Info, "MK-PERSIST-PRELOAD": High, "MK-PERSIST-SSH-KEYS": Info, "MK-VULN": High,
+	"MK-SSH-PASSWORD": High, "MK-SSH-ROOT-PASSWORD": High, "MK-SSH-WEAK-SETTINGS": Low, "MK-FW-INACTIVE": Medium,
+	"MK-NET-PUBLIC-SERVICE": High, "MK-DOCKER-UFW": Medium, "MK-EGRESS-OPEN": Info, "MK-DOCKER-PRIVILEGED": Critical,
+	"MK-DOCKER-SOCK": Critical, "MK-DOCKER-HOST-NS": High, "MK-DOCKER-CAPS": High, "MK-DOCKER-ROOT": Medium,
+	"MK-DOCKER-TMP-EXEC": Medium, "MK-DOCKER-NO-NEW-PRIVS": Low, "MK-DOCKER-RW-ROOT": Info, "MK-UPDATES-AUTO-OFF": Medium,
+	"MK-UPDATES-PENDING": Medium, "MK-UPDATES-REBOOT": Low, "MK-KERNEL-SYSCTL": Low, "MK-HOST-TMP-EXEC": Low,
+	"MK-F2B-INACTIVE": Medium, "MK-F2B-NO-SSHD": Low, "MK-APPARMOR-OFF": Low, "MK-SECRET-PERMS": Medium,
+	"MK-LOG-AUDITD": Low, "MK-LOG-REMOTE": Info,
 }
 
 // check returns the severity of a built-in check and whether it is enabled.

@@ -51,9 +51,10 @@ func Main(args []string) int {
 	jsonOut := fs.Bool("json", false, "print the report as JSON")
 	consent := fs.Bool("consent", false, "confirm consent non-interactively (for automation)")
 	maxMB := fs.Int64("max-file-mb", 64, "skip hashing/reading files bigger than this")
+	only := fs.String("only", "malware,posture,vulns", "checks to run: any of malware, posture, vulns (comma-separated)")
 	showRules := fs.Bool("list-rules", false, "print the catalog in use (sources, checks, rules, vulnerabilities) and exit")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `makit scan [options] — read-only malware check (host and/or containers). Reports only; changes nothing.
+		fmt.Fprint(os.Stderr, `makit scan [options] — read-only security check (host and/or containers). Reports only; changes nothing.
 
 `)
 		fs.PrintDefaults()
@@ -125,15 +126,34 @@ func Main(args []string) int {
 			fmt.Fprintf(os.Stderr, "  … %s\n", msg)
 		}
 	}
-	progress("processes and network connections")
-	s.processes(*host, targets)
+	run := map[string]bool{}
+	for _, k := range strings.Split(*only, ",") {
+		run[strings.TrimSpace(k)] = true
+	}
+	var conts []target
 	for _, t := range targets {
-		progress("files on " + t.name)
-		s.files(t)
-		progress("persistence on " + t.name)
-		s.persistence(t)
-		progress("Next.js / React versions on " + t.name)
-		s.packages(t)
+		if t.name != "host" {
+			conts = append(conts, t)
+		}
+	}
+	if run["malware"] {
+		progress("processes and network connections")
+		s.processes(*host, targets)
+	}
+	if run["posture"] {
+		progress("configuration (SSH, firewall, exposed services, containers, updates, kernel, logging)")
+		s.posture(*host, conts)
+	}
+	for _, t := range targets {
+		if run["malware"] {
+			progress("files and start-up entries on " + t.name)
+			s.files(t)
+			s.persistence(t)
+		}
+		if run["vulns"] {
+			progress("installed packages on " + t.name)
+			s.packages(t)
+		}
 	}
 	rep.Finished = time.Now()
 	rep.sort()
@@ -154,13 +174,15 @@ func Main(args []string) int {
 
 func askConsent(targets []target, given bool) bool {
 	fmt.Fprintln(os.Stderr, `
-makit scan — read-only malware check
+makit scan — read-only security check
 
 It will READ:
   · every running process: its command line, executable (hashed) and open network connections
   · files in temporary and home directories (/tmp, /var/tmp, /dev/shm, /root, /home, /run), extra --path dirs
   · start-up locations: cron, systemd units, /etc/rc.local, /etc/ld.so.preload, shell profiles
-  · installed Next.js / React packages (CVE-2025-55182)`)
+  · configuration: sshd -T, ufw/iptables rules, listening ports, docker inspect, sysctl, mounts, apt-get -s,
+    fail2ban/AppArmor/auditd state, permissions of .env files
+  · installed packages, matched against the vulnerability catalog`)
 	for _, t := range targets {
 		if t.name != "host" {
 			fmt.Fprintf(os.Stderr, "  · %s: its filesystem (from the host, via %s) and the files changed since its image\n", t.name, t.root)

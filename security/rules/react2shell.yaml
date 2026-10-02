@@ -1,11 +1,16 @@
 id: MK-R2S
 title: React2Shell (CVE-2025-55182) backdoor and dropper
+doc: docs/security/malware.md#indicators-from-the-catalog
 refs: [CVE-2025-55182]
-sources: [https://github.com/ngvcanh/CVE-2025-55182-Attack-Analysis]
+sources:
+  - https://github.com/ngvcanh/CVE-2025-55182-Attack-Analysis
+  - https://www.virustotal.com/gui/file/4d6062140b854344d53bcdbbc1137d21e65d043adf92972fefddd2cc765d56e5
 indicators:
   sha256:
     - value: 0f0f9c339fcc267ec3d560c7168c56f607232cbeb158cb02a0818720a54e72ce
       note: Linux.BackDoor.Siggen.389 — Go backdoor dropped as /tmp/vim
+    - value: 4d6062140b854344d53bcdbbc1137d21e65d043adf92972fefddd2cc765d56e5
+      note: React2Shell (CVE-2025-55182) sample — https://www.virustotal.com/gui/file/4d6062140b854344d53bcdbbc1137d21e65d043adf92972fefddd2cc765d56e5
   ips:
     - value: 45.76.155.14
       note: malware distribution server

@@ -1,6 +1,7 @@
 id: MK-DROPPER
 title: Script downloads and runs code (dropper pattern)
 severity: high
+doc: docs/security/malware.md#files
 refs: [CVE-2025-55182]
 # A file is reported when it matches at least min_matches patterns (one is enough in start-up entries,
 # and any indicator string from another rule counts on its own).
