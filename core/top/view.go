@@ -56,7 +56,7 @@ func (m *model) table(cols []column, n int, row func(i int) []cell, y0, height i
 	var head strings.Builder
 	for i, c := range cols {
 		t := c.title
-		if ls != nil && ls.sortCol == i && c.title != "" && m.tab != tSetup {
+		if ls != nil && ls.sortCol == i && c.title != "" && m.tab != tSetup && m.tab != tShield {
 			if ls.desc {
 				t += "▼"
 			} else {
@@ -161,6 +161,8 @@ func (m *model) View() string {
 			body = m.viewerView(&m.journal, 2, bodyH, "↑↓ PgUp PgDn scroll · End follow · r reload")
 		case tSetup:
 			body = m.setupView(bodyH)
+		case tShield:
+			body = m.shieldView(bodyH)
 		}
 	}
 	for len(body) < bodyH {
@@ -218,13 +220,16 @@ func (m *model) statusLine() string {
 	}
 	var left string
 	switch {
+	case m.input != nil:
+		left = " " + sAccent.Render(m.input.prompt+":") + " " + m.input.value + "█  " + sDim.Render(m.input.hint+" · Enter add · Esc cancel")
 	case m.filtering:
 		left = " filter: " + m.filter + "█  (Enter keep · Esc clear)"
 	case m.flash != "" && time.Since(m.flashAt) < 5*time.Second:
 		left = " " + sWarn.Render(m.flash)
 	default:
 		hints := map[tab]string{
-			tOverview:   "1-7/click tabs · q quit",
+			tOverview:   "1-8/click tabs · q quit",
+			tShield:     "s on/off · a ask · e edge · m mode · b ban · w allow · i bot IP · u bot URL · d remove · R reports · / filter",
 			tProcs:      "↑↓ select · click header/o sort · / filter · k kill · q quit",
 			tContainers: "↑↓ select · Enter/l logs · r restart · s start/stop · / filter · q quit",
 			tServices:   "↑↓ select · Enter/l logs · r restart · f failed only · / filter · q quit",

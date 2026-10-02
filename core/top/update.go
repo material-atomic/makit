@@ -1,6 +1,8 @@
 package top
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -15,6 +17,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{slowTick(), m.loadContainers(), m.loadServices()}
 		if m.tab == tLogs {
 			cmds = append(cmds, m.loadJournal())
+		}
+		if m.tab == tShield {
+			cmds = append(cmds, m.loadShield())
 		}
 		if m.viewer != nil && m.viewer.offset < 0 && m.viewer.reload != nil {
 			cmds = append(cmds, m.viewer.reload())
@@ -44,6 +49,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewer.lines = []string{"error: " + msg.err.Error()}
 			}
 		}
+	case shieldMsg:
+		m.shield.shieldMsg, m.shield.loaded = msg, true
+	case shieldDoneMsg:
+		m.shield.busy = ""
+		m.say(msg.text)
+		return m, m.loadShield()
 	case actionMsg:
 		m.say(msg.text)
 		return m, tea.Batch(m.loadContainers(), m.loadServices())
@@ -80,6 +91,8 @@ func (m *model) setTab(t tab) tea.Cmd {
 		return m.loadJournal()
 	case tSetup:
 		return m.loadComps()
+	case tShield:
+		return m.loadShield()
 	}
 	return nil
 }
@@ -188,6 +201,22 @@ func (m *model) onKey(k tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
+	if in := m.input; in != nil {
+		switch k.Type {
+		case tea.KeyEsc:
+			m.input = nil
+		case tea.KeyEnter:
+			m.input = nil
+			return in.submit(strings.TrimSpace(in.value))
+		case tea.KeyBackspace:
+			if r := []rune(in.value); len(r) > 0 {
+				in.value = string(r[:len(r)-1])
+			}
+		case tea.KeyRunes, tea.KeySpace:
+			in.value += string(k.Runes)
+		}
+		return nil
+	}
 	if m.filtering {
 		switch k.Type {
 		case tea.KeyEsc:
@@ -244,14 +273,14 @@ func (m *model) onKey(k tea.KeyMsg) tea.Cmd {
 	switch key {
 	case "q":
 		return tea.Quit
-	case "1", "2", "3", "4", "5", "6", "7":
+	case "1", "2", "3", "4", "5", "6", "7", "8":
 		return m.setTab(tab(key[0] - '1'))
 	case "tab", "right":
 		return m.setTab((m.tab + 1) % tab(len(tabNames)))
 	case "shift+tab", "left":
 		return m.setTab((m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames)))
 	case "/":
-		if m.tab == tProcs || m.tab == tContainers || m.tab == tServices {
+		if m.tab == tProcs || m.tab == tContainers || m.tab == tServices || m.tab == tShield {
 			m.filtering, m.filter = true, ""
 		}
 	case "esc":
@@ -284,6 +313,8 @@ func (m *model) onKey(k tea.KeyMsg) tea.Cmd {
 		}
 	case "r":
 		switch m.tab {
+		case tShield:
+			return m.loadShield()
 		case tContainers:
 			m.containerAction("restart")
 		case tServices:
@@ -295,6 +326,28 @@ func (m *model) onKey(k tea.KeyMsg) tea.Cmd {
 		if m.tab == tContainers {
 			m.containerAction("toggle")
 		}
+		if m.tab == tShield {
+			return m.shieldButton(btnService)
+		}
+	case "e", "m", "b", "w", "u", "R", "d", "delete":
+		if m.tab == tShield {
+			switch key {
+			case "e":
+				return m.shieldButton(btnEdge)
+			case "m":
+				return m.shieldButton(btnMode)
+			case "b":
+				return m.shieldButton(btnBan)
+			case "w":
+				return m.shieldButton(btnAllow)
+			case "u":
+				return m.shieldButton(btnBotURL)
+			case "R":
+				return m.shieldButton(btnReport)
+			default:
+				m.shieldDelete()
+			}
+		}
 	case "f":
 		if m.tab == tServices {
 			m.failedOnly = !m.failedOnly
@@ -304,9 +357,15 @@ func (m *model) onKey(k tea.KeyMsg) tea.Cmd {
 		if m.tab == tSetup {
 			return m.activate()
 		}
+		if m.tab == tShield {
+			return m.shieldButton(btnBotIP)
+		}
 	case "a":
 		if m.tab == tSetup {
 			m.installMissing()
+		}
+		if m.tab == tShield {
+			return m.shieldButton(btnAsk)
 		}
 	case "l":
 		if m.tab == tContainers || m.tab == tServices {
@@ -353,6 +412,13 @@ func (m *model) onMouse(e tea.MouseMsg) tea.Cmd {
 		if in(h, e.X, e.Y) {
 			m.viewer = nil
 			return m.setTab(tab(h.idx))
+		}
+	}
+	if m.tab == tShield && m.viewer == nil {
+		for _, h := range m.shield.hits {
+			if in(h, e.X, e.Y) {
+				return m.shieldButton(h.idx)
+			}
 		}
 	}
 	for _, h := range m.btnHits {

@@ -72,7 +72,7 @@ makit init --sysctl opensearch --volume auto --mount /mnt/data --docker-volumes 
 ## makit top
 
 A terminal dashboard, no htop needed. Mouse: click tabs, click column headers to sort, scroll with the wheel, click a
-row to select it (click again to open), click buttons. Keyboard: `1`–`7`, arrows, `/` to filter, `q` to quit.
+row to select it (click again to open), click buttons. Keyboard: `1`–`8`, arrows, `/` to filter, `q` to quit.
 
 | Tab | Shows | Actions (asks first, needs root) |
 | --- | --- | --- |
@@ -82,6 +82,7 @@ row to select it (click again to open), click buttons. Keyboard: `1`–`7`, arro
 | Services | systemd services (`f` failed only) | journal, restart |
 | Disks | Usage per filesystem, read/write per disk | — |
 | Logs | System journal (follows the end) | — |
+| Shield | The gate: service, **Ask** (Caddy/nginx ask makit) and **Edge** (makit checks and blocks in front) as separate switches, mode, counters; bans, allowlist, bot IPs and bot IP sources | turn on/off, toggle ask/edge/mode, + Ban IP, + Allow IP, + Bot IP, + Bot URL (typed inline), remove, latest reports |
 | Setup | Everything `makit init` manages, ✓/✗ per item | Install / re-run with a live log, "install all missing" |
 
 ## makit scan

@@ -67,3 +67,15 @@ func StripANSI(s string) string {
 	}
 	return b.String()
 }
+
+// RunMakitArgs is RunMakit with arguments kept as given (values with spaces, such as a ban reason).
+func RunMakitArgs(makit string, args []string, fn func(line string)) error {
+	cmd := exec.Command(makit, args...)
+	out, err := cmd.CombinedOutput()
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if l != "" {
+			fn(StripANSI(l))
+		}
+	}
+	return err
+}

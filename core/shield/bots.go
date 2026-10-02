@@ -756,3 +756,9 @@ func (bc *BotCatalog) Robots() string {
 	b.WriteString("Disallow: /\n")
 	return b.String()
 }
+
+// FeedStatuses is the last download of every bot IP feed, by cache file name (see FeedFile).
+func FeedStatuses() map[string]FeedStatus { return readFeedStatus() }
+
+// FeedFile is the cache file name of an agent's feed URL.
+func FeedFile(agent, url string) string { return feedFile(agent, url) }

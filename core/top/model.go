@@ -22,10 +22,11 @@ const (
 	tServices
 	tDisks
 	tLogs
+	tShield
 	tSetup
 )
 
-var tabNames = []string{"Overview", "Processes", "Containers", "Services", "Disks", "Logs", "Setup"}
+var tabNames = []string{"Overview", "Processes", "Containers", "Services", "Disks", "Logs", "Shield", "Setup"}
 
 const histLen = 240
 
@@ -99,6 +100,9 @@ type model struct {
 	comps      []sys.Component
 	compErr    string
 
+	shield shieldState
+	input  *inputBox
+
 	installing string
 	installLog []string
 	installOK  *bool
@@ -125,7 +129,7 @@ func newModel(root, makit string, interval time.Duration) *model {
 		docker: sys.NewDocker("/var/run/docker.sock"), lists: map[tab]*listState{}}
 	m.users = m.root.Users()
 	m.lists[tProcs] = &listState{sortCol: 2, desc: true}
-	for _, t := range []tab{tContainers, tServices, tDisks, tSetup} {
+	for _, t := range []tab{tContainers, tServices, tDisks, tShield, tSetup} {
 		m.lists[t] = &listState{}
 	}
 	m.journal = viewer{title: "System journal", offset: -1}
@@ -381,6 +385,8 @@ func (m *model) rowCount() int {
 		return len(m.mounts)
 	case tSetup:
 		return len(m.comps)
+	case tShield:
+		return len(m.shieldRows())
 	}
 	return 0
 }
