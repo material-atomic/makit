@@ -168,6 +168,31 @@ report:
   keep_days: 30
 ```
 
+## Analysing logs
+
+The same policy can read the access logs you already have — to see what the gate would do before turning it on, to
+look back at an incident, or instead of the gate: `--follow --ban --notify` turns a log into bans and alerts without
+anything in the request path.
+
+```bash
+makit shield analyze /var/log/nginx/access.log                 # batch reports, nothing changed
+makit shield analyze /var/log/caddy/access.log --batch 10m --json
+makit shield analyze /var/log/nginx/access.log --follow --ban --notify --quiet
+zcat /var/log/nginx/access.log.2.gz | makit shield analyze -
+```
+
+nginx's `combined` format works; to know the visitor behind Cloudflare and the site, log two more fields:
+
+```nginx
+log_format makit '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
+                 '"$http_referer" "$http_user_agent" "$http_cf_connecting_ip" "$host"';
+access_log /var/log/nginx/access.log makit;
+```
+
+Caddy's JSON access log is read as is, request headers included (cookies and authorization are ignored). Status
+codes count in log analysis (many 4xx, the app answering 5xx to probes), and claimed bots are verified by reverse DNS
+(`--verify=false` for speed). Without `--ban` nothing is written; with it, bans go to the same list the gate uses.
+
 ## Snapshots
 
 Each decision is a JSON line in `/var/log/makit/shield/requests.jsonl` (rotated): time, client IP, peer, proxy,

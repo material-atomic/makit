@@ -139,17 +139,7 @@ func Serve(cfgPath string, dirs []string) error {
 	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
 	// Batch reports go to every channel of `makit notify` whose min_level they reach (the channel file is read at
 	// each send, so channels added later work without a restart).
-	g.send = func(title, text, level string) {
-		go func() {
-			c, err := notify.Load(notifyConfig())
-			if err != nil || len(c.Channels) == 0 {
-				return
-			}
-			for _, err := range c.Send(notify.Message{Title: title, Text: text, Level: level, Source: "shield"}, "") {
-				log.Printf("shield: notify: %v", err)
-			}
-		}()
-	}
+	g.send = func(title, text, level string) { go sendNotify(title, text, level) }
 	g.rep = NewReporter(time.Now())
 	// Edge listeners start/stop with the "edge" switch and restart when their configuration changes.
 	var edgeMu sync.Mutex
@@ -575,12 +565,33 @@ func (g *Gate) emitReport(c *Config, host string) {
 	if !b.Worth(c.Report.MinLevel) || g.send == nil {
 		return
 	}
-	level := map[string]string{"critical": "critical", "high": "high", "bot": "high", "medium": "medium", "likely": "medium"}[b.Level]
+	title, level := b.notification()
+	g.send(title, b.Text, level)
+}
+
+func (b *BatchReport) notification() (title, level string) {
+	level = map[string]string{"critical": "critical", "high": "high", "bot": "high", "medium": "medium", "likely": "medium"}[b.Level]
 	if level == "" || (b.Banned > 0 && levelRank[level] < levelRank["high"]) {
 		level = "high"
 	}
-	title := fmt.Sprintf("%d suspicious IPs, %d banned", len(b.IPs)+b.MoreIPs, b.Banned)
-	g.send(title, b.Text, level)
+	return fmt.Sprintf("%d suspicious IPs, %d banned", len(b.IPs)+b.MoreIPs, b.Banned), level
+}
+
+func sendReport(b *BatchReport) {
+	title, level := b.notification()
+	sendNotify(title, b.Text, level)
+}
+
+// sendNotify delivers through every makit notify channel whose min_level it reaches (the channel file is read at
+// each send, so channels added later work without a restart).
+func sendNotify(title, text, level string) {
+	c, err := notify.Load(notifyConfig())
+	if err != nil || len(c.Channels) == 0 {
+		return
+	}
+	for _, err := range c.Send(notify.Message{Title: title, Text: text, Level: level, Source: "shield"}, "") {
+		log.Printf("shield: notify: %v", err)
+	}
 }
 
 func boolInt(b bool) int {

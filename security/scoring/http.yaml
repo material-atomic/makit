@@ -34,9 +34,9 @@ signals:
   - { id: method-trace, field: method, match: '^(TRACE|TRACK|DEBUG)$', score: 40, label: "TRACE/DEBUG method" }
   - { id: method-connect, field: method, match: '^CONNECT$', score: 50, label: "CONNECT (proxy abuse)" }
   - { id: method-h2-preface, field: method, match: '^PRI$', score: 60, label: "HTTP/2 preface on HTTP/1" }
-  - { id: method-tls-on-http, field: method, match: '^\\x16\\x03', score: 60, label: "TLS handshake on the plain HTTP port" }
+  - { id: method-tls-on-http, field: raw, match: '^\\x16\\x03', score: 60, label: "TLS handshake on the plain HTTP port" }
   - { id: probe-rdp, field: raw, match: '(?i)mstshash=', score: 85, label: "RDP scan on the HTTP port" }
-  - { id: method-malformed, field: method, match: '^(\\x[0-9A-Fa-f]{2}|[^A-Z]|$)', score: 60, label: "malformed or empty request line" }
+  - { id: method-malformed, field: raw, match: '^(\\x[0-9A-Fa-f]{2}|[^A-Z]|$)', score: 60, label: "malformed or empty request line" }
   # --- secrets, admin panels, backups
   - { id: path-dotenv, field: path, match: '(?i)/\.env(\.|$|/)', score: 90, label: ".env secret file probe" }
   - { id: path-vcs, field: path, match: '(?i)/\.(git|svn|hg|bzr)(/|$)', score: 80, label: "source repository probe (.git)" }

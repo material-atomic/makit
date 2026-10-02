@@ -21,6 +21,7 @@ type Request struct {
 	Headers  map[string]string // lower-cased request headers (for rules)
 	Raw      string            // original request line when known (log analysis)
 	Received time.Time
+	Status   int // response status, known when analysing logs (0 live)
 }
 
 type Decision struct {
@@ -184,11 +185,11 @@ func (p *Policy) Decide(r Request) Decision {
 			return block("rule:"+rule.ID, rule.Title)
 		}
 	}
-	q := newScored(&r, 0) // decoded fields, shared by the attack score and the bot score
+	q := newScored(&r, r.Status) // decoded fields, shared by the attack score and the bot score
 	if p.Scoring != nil {
 		score, hits := p.Scoring.score(q)
 		if p.Tracker != nil {
-			ipScore, bursts := p.Tracker.Observe(client, score, hits, 0, now)
+			ipScore, bursts := p.Tracker.Observe(client, score, hits, r.Status, now)
 			hits = append(hits, bursts...)
 			score = max(score, ipScore)
 		}
@@ -202,7 +203,7 @@ func (p *Policy) Decide(r Request) Decision {
 	if p.BotScore != nil && d.Bot == nil {
 		score, hits := p.BotScore.score(q)
 		if p.BotTracker != nil {
-			ipScore, bursts := p.BotTracker.Observe(client, score, hits, 0, now)
+			ipScore, bursts := p.BotTracker.Observe(client, score, hits, r.Status, now)
 			hits = append(hits, bursts...)
 			score = max(score, ipScore)
 		}

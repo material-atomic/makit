@@ -34,6 +34,8 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
   cloudflare-update             refresh Cloudflare's IP ranges now
   set mode block|observe|pass · set ask on|off · set edge on|off
                                 change a switch in the config (the running gate reloads within 2 s)
+  analyze FILE|- [--format nginx|caddy] [--batch 5m] [--follow] [--ban] [--notify] [--json] [--quiet]
+                                score an nginx/Caddy access log with the same policy and print batch reports
   report [-n 1] [--date YYYY-MM-DD]
                                 the latest batch reports (also sent through makit notify when worth it)
   bots …                        known bots, crawlers and AI agents: policy per category or agent (makit shield bots help)
@@ -96,6 +98,8 @@ func Main(args []string, dirs []string) int {
 		err = cmdBots(cfgPath, dirs, rest)
 	case "report":
 		err = cmdReport(cfgPath, rest)
+	case "analyze":
+		err = cmdAnalyze(cfgPath, dirs, rest)
 	case "customize":
 		err = cmdCustomize(dirs, rest)
 	case "help", "--help", "-h":
