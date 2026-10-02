@@ -529,28 +529,34 @@ func notifyConfig() string {
 	return notify.DefaultConfig
 }
 
-// reportLoop closes a batch report every report.every, saves it and sends it when it is worth it.
+// reportLoop closes a batch report every report.every, saves it and sends it when it is worth it. It checks every
+// few seconds, so a changed interval applies at once.
 func (g *Gate) reportLoop(ctx context.Context, cfg func() *Config) {
 	host, _ := os.Hostname()
+	start := time.Now()
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			if _, on := cfg().Report.Window(); on {
+				g.emitReport(cfg(), host)
+			}
+			return
+		case <-t.C:
+		}
 		c := cfg()
 		every, on := c.Report.Window()
 		if !on {
-			every = time.Minute // reports off: check again later, keep the window empty
-		}
-		select {
-		case <-ctx.Done():
-			if on {
-				g.emitReport(c, host)
-			}
-			return
-		case <-time.After(every):
-		}
-		if !on {
-			g.rep.Flush(time.Now(), host)
+			g.rep.Flush(time.Now(), host) // reports off: keep the window empty
+			start = time.Now()
 			continue
 		}
-		g.emitReport(cfg(), host)
+		if time.Since(start) < every {
+			continue
+		}
+		start = time.Now()
+		g.emitReport(c, host)
 	}
 }
 

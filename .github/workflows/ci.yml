@@ -88,7 +88,7 @@ jobs:
           sudo systemctl start makit-scan.service
           sudo ls /var/log/makit/scans/ | grep -q '^scan-.*\.json$'
           sudo makit schedule status
-      - name: shield — Caddy asks makit; makit in front; bans, rules, allowlist, kernel set
+      - name: shield — Caddy asks makit; makit in front; bans, rules, allowlist, kernel set, bots, analyze, reports, notify
         run: |
           set -x
           sudo makit shield on
@@ -98,6 +98,21 @@ jobs:
           sudo sed -i 's#^listeners: \[\].*##' /etc/makit/shield.yaml
           sudo makit shield edge on
           sudo systemctl restart makit-shield && sleep 2
+          sudo sed -i 's#every: 5m#every: 1m#' /etc/makit/shield.yaml
+          # a webhook receiver for makit notify
+          cat > /tmp/hook.py <<'PY'
+          import http.server
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+                  open('/tmp/hook.log', 'ab').write(body + b'\n')
+                  self.send_response(204); self.end_headers()
+          http.server.HTTPServer(('127.0.0.1', 8099), H).serve_forever()
+          PY
+          (python3 /tmp/hook.py &) ; sleep 1
+          sudo makit notify add webhook --name ci --url http://127.0.0.1:8099/hook --min-level info
+          sudo makit notify list
+          sudo makit notify test ci && grep -q 'makit test message' /tmp/hook.log
           (mkdir -p /tmp/www && echo hello > /tmp/www/index.html && cd /tmp/www && python3 -m http.server 8091 --bind 127.0.0.1 &) ; sleep 1
           cat > /tmp/Caddyfile <<'CADDY'
           {
@@ -134,11 +149,40 @@ jobs:
           sudo makit shield import /tmp/feed.txt --name ci-feed --for 1h --reason "ci feed" && sleep 3
           test "$(code -H 'CF-Connecting-IP: 192.0.2.77' http://127.0.0.1:8088/)" = 403        # bulk list
           sudo nft list set inet makit_shield list4net | grep -q 192.0.2.0/24
+          # bots: a fake Googlebot is caught once reverse DNS answers; policy per category; GoesBot passes; limits
+          ua() { curl -s -o /dev/null -w '%{http_code}' -A "$1" -H "CF-Connecting-IP: $2" "http://127.0.0.1:8088${3:-/}"; }
+          ua "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" 198.51.100.40 >/dev/null; sleep 4
+          test "$(ua 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' 198.51.100.40)" = 403
+          sudo makit shield bots set ai-crawler block
+          sudo makit shield bots set chatgpt-user "limit 2/1m" && sleep 3
+          test "$(ua 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)' 198.51.100.41)" = 403
+          test "$(ua 'GoesBot/1.0 (+https://goes.vn/bot)' 198.51.100.42)" = 200
+          ua 'ChatGPT-User/1.0' 198.51.100.43 >/dev/null; ua 'ChatGPT-User/1.0' 198.51.100.44 >/dev/null
+          test "$(ua 'ChatGPT-User/1.0' 198.51.100.45)" = 429
+          # bot IP sources: a URL refreshed on a schedule and a typed IP; their agents are recognised by IP alone
+          printf '# partner crawler\n198.51.100.50\n' > /tmp/www/partner.txt
+          sudo makit shield bots source add http://127.0.0.1:8091/partner.txt --agent partner --category monitoring
+          sudo makit shield bots ip add office 198.51.100.60 --category monitoring && sleep 3
+          sudo makit shield bots sources
+          test "$(ua 'Mozilla/5.0 Chrome/126.0' 198.51.100.50 /.env)" = 200     # verified + allow: no rules
+          test "$(ua 'Mozilla/5.0 Chrome/126.0' 198.51.100.60 /.env)" = 200
+          sudo makit shield bots robots | grep -q 'User-agent: GPTBot'
+          # log analysis with the same policy
+          printf '%s\n' '85.204.70.96 - - [21/May/2026:14:24:01 +0000] "GET /wp1/wp-includes/wlwmanifest.xml HTTP/1.1" 500 0 "-" "-"' \
+            '91.238.181.96 - - [21/May/2026:14:26:11 +0000] "\x03\x00\x00/*\xE0\x00\x00\x00\x00\x00Cookie: mstshash=Administr" 400 157 "-" "-"' > /tmp/access.log
+          sudo makit shield analyze /tmp/access.log --verify=false | tee /tmp/analyze.txt
+          grep -q 'WordPress probing' /tmp/analyze.txt && grep -q 'RDP scan' /tmp/analyze.txt
           sudo makit shield edge off && sleep 3
           if curl -s -m 3 http://127.0.0.1:8090/ >/dev/null; then echo "edge still listening"; exit 1; fi
           sudo makit shield list
           sudo makit shield log --blocked
           sudo makit shield status
+          # the batch report is written and sent by itself (report.every is 1m here)
+          for i in $(seq 1 30); do ls /var/log/makit/shield/reports/*.txt >/dev/null 2>&1 && break; sleep 5; done
+          sudo makit shield report | tee /tmp/report.txt
+          grep -q 'suspicious IPs' /tmp/report.txt
+          for i in $(seq 1 12); do grep -q 'suspicious IPs' /tmp/hook.log 2>/dev/null && break; sleep 5; done
+          grep -q 'suspicious IPs' /tmp/hook.log
           sudo makit shield off && sleep 2
           test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:8088/)" = 200          # off = pass
           docker rm -f caddy

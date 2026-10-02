@@ -1,16 +1,37 @@
 # Changelog
 
 ## v0.5.0
-- `makit shield`: IP gate for web traffic with its own block set (IP/CIDR, expiry; no ipset) and allowlist.
-  - Ask mode: Caddy `forward_auth` / nginx `auth_request` call `/check` (`makit shield snippet caddy|nginx`).
-  - Edge mode: makit in front of Caddy/nginx — TLS (ACME TLS-ALPN, Cloudflare Origin Certificate or files), blocked
-    direct visitors disconnected at accept, real client IP forwarded; `tcp://` passthrough with optional PROXY v1.
-  - Cloudflare-aware: `CF-Connecting-IP` trusted only from Cloudflare ranges (refreshed daily); spoofing ignored.
-  - HTTP rules in the catalog (`security/http/`): secret/admin probing, path traversal, scanner user agents,
-    React2Shell pattern — with automatic bans.
-  - Request snapshots (no bodies, cookies or credentials), `log`, `status`, `check`; optional nftables kernel set.
-  - `on` / `off` (pass, proxies keep working) / `uninstall`; lock-out guards for your SSH address and Cloudflare.
-- Guide: docs/security/shield.md. Setup tab: request shield.
+- `makit shield`: a gate for web traffic, in front of every request.
+  - Its own IP set (IP/CIDR with expiry, a hash table per prefix length — no ipset): ~180 ns per lookup with
+    1,000,000 entries; bulk lists (`import`, millions of entries); an allowlist that always wins.
+  - Two independent switches: **ask** (Caddy `forward_auth` / nginx `auth_request` call `/check`; `snippet
+    caddy|nginx`) and **edge** (makit in front: TLS via ACME TLS-ALPN, Cloudflare Origin Certificate or files; blocked
+    direct visitors dropped at accept; `tcp://` passthrough with optional PROXY v1). Modes block / observe / pass.
+  - Cloudflare-aware: `CF-Connecting-IP` trusted only from Cloudflare ranges (refreshed daily).
+  - HTTP rules (`security/http/`): secret/admin probes, path traversal, scanners, React2Shell — automatic bans.
+  - Request scoring (`security/scoring/http.yaml`, online and overridable): probes, XSS in the URL, SQL injection,
+    Log4Shell, command injection, raw requests (RDP/TLS on the HTTP port), floods; values decoded first; per-IP
+    escalation and bursts; actions per level. Profiles (WordPress, PHP), overrides in `shield.yaml`,
+    `makit shield customize` for your own copy in `/etc/makit/security`.
+  - Bots, crawlers and AI agents (`security/bots/agents.yaml`): search engines, AI search/assistants/crawlers/agents
+    (Web Bot Auth), SEO, link previews, monitors, libraries, headless browsers. Verified against published ranges or
+    forward-confirmed reverse DNS (fake Googlebots caught). Your policy per category or agent: allow, log, block,
+    ban, `limit N/window` (429). Bot score for undeclared automation. Your own bot IP sources: URLs refreshed on a
+    schedule, typed IPs (`bots source add`, `bots ip add`). `bots robots` writes robots.txt lines. GoesBot and
+    goes.vn webhooks are allowed by default.
+  - Batch reports every 5 minutes (`report:`): per suspicious IP with level, readable signals, paths, statuses and
+    the action taken; saved to `/var/log/makit/shield/reports`, sent through `makit notify` when worth it.
+  - `makit shield analyze FILE` scores nginx/Caddy access logs with the same policy (`--follow --ban --notify`).
+  - Automatic bans apply at once and are saved in batches (no disk write in the request path); optional nftables
+    kernel set; request snapshots; lock-out guards for your SSH address and Cloudflare.
+- `makit notify`: Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks, email; per-channel minimum
+  level, no duplicate floods. Scheduled scans and shield reports use it.
+- `makit top`: Shield tab — ask and edge switches, mode, counters, bans, allowlist, bot IPs and sources with inline
+  inputs, latest reports. Setup moves to tab 8.
+- `benchmark/`: reproducible benchmarks (`benchmark/run.sh`, Docker only) — per-step decision cost and end-to-end
+  latency with and without makit. A browser request costs ~9 µs to decide; makit adds well under 1 ms (p50).
+- Catalog: `/etc/makit/security` for your own files (never overwritten by `makit rules update`).
+- Guides: docs/security/shield.md, bots.md, notifications.md. README leads with what makit is now.
 
 ## v0.4.0
 - Security guides in `docs/security/` (one page per topic); every finding links its page for the running version,
