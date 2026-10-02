@@ -154,11 +154,12 @@ jobs:
           ua "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" 198.51.100.40 >/dev/null; sleep 4
           test "$(ua 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' 198.51.100.40)" = 403
           sudo makit shield bots set ai-crawler block
-          sudo makit shield bots set chatgpt-user "limit 2/1m" && sleep 3
+          sudo makit shield bots set claude-user "limit 2/1m" && sleep 3   # unverifiable agent (ChatGPT-User from a non-OpenAI IP is a fake: 403)
           test "$(ua 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)' 198.51.100.41)" = 403
           test "$(ua 'GoesBot/1.0 (+https://goes.vn/bot)' 198.51.100.42)" = 200
-          ua 'ChatGPT-User/1.0' 198.51.100.43 >/dev/null; ua 'ChatGPT-User/1.0' 198.51.100.44 >/dev/null
-          test "$(ua 'ChatGPT-User/1.0' 198.51.100.45)" = 429
+          test "$(ua 'ChatGPT-User/1.0' 198.51.100.43)" = 403          # published ranges: not OpenAI → spoofed
+          ua 'Claude-User/1.0' 198.51.100.44 >/dev/null; ua 'Claude-User/1.0' 198.51.100.46 >/dev/null
+          test "$(ua 'Claude-User/1.0' 198.51.100.45)" = 429
           # bot IP sources: a URL refreshed on a schedule and a typed IP; their agents are recognised by IP alone
           printf '# partner crawler\n198.51.100.50\n' > /tmp/www/partner.txt
           sudo makit shield bots source add http://127.0.0.1:8091/partner.txt --agent partner --category monitoring
