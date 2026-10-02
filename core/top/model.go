@@ -100,8 +100,10 @@ type model struct {
 	comps      []sys.Component
 	compErr    string
 
-	shield shieldState
-	input  *inputBox
+	shield        shieldState
+	input         *inputBox
+	upd           updateMsg // newer makit release?
+	versionInTabs bool
 
 	installing string
 	installLog []string
@@ -170,7 +172,7 @@ func slowTick() tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(tick(m.interval), m.loadContainers(), m.loadServices(), m.loadComps(), slowTick())
+	return tea.Batch(tick(m.interval), m.loadContainers(), m.loadServices(), m.loadComps(), slowTick(), m.checkUpdate(), updateTick())
 }
 
 func (m *model) loadContainers() tea.Cmd {

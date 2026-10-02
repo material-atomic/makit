@@ -204,6 +204,11 @@ func (m *model) tabsLine() string {
 		b.WriteString(" ")
 		x++
 	}
+	m.versionInTabs = false
+	if v := m.versionLabel(); m.w-x-ansi.StringWidth(v)-1 >= 2 {
+		b.WriteString(strings.Repeat(" ", m.w-x-ansi.StringWidth(v)-1) + v)
+		m.versionInTabs = true
+	}
 	return b.String()
 }
 
@@ -246,7 +251,10 @@ func (m *model) statusLine() string {
 	if m.isRoot {
 		who = "root"
 	}
-	right := sDim.Render(fmt.Sprintf("makit %s · %s ", Version, who))
+	right := sDim.Render(who + " ")
+	if !m.versionInTabs { // narrow screen: the version line moves here
+		right = m.versionLabel() + sDim.Render(" · "+who+" ")
+	}
 	gap := m.w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
 		return fit(left, m.w)

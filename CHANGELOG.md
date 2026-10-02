@@ -27,7 +27,8 @@
 - `makit notify`: Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks, email; per-channel minimum
   level, no duplicate floods. Scheduled scans and shield reports use it.
 - `makit top`: Shield tab — ask and edge switches, mode, counters, bans, allowlist, bot IPs and sources with inline
-  inputs, latest reports. Setup moves to tab 8.
+  inputs, latest reports. Setup moves to tab 8. A version line: green when up to date, yellow with the newer
+  release and `makit upgrade` when there is one.
 - `benchmark/`: reproducible benchmarks (`benchmark/run.sh`, Docker only) — per-step decision cost and end-to-end
   latency with and without makit. A browser request costs ~9 µs to decide; makit adds well under 1 ms (p50).
 - Catalog: `/etc/makit/security` for your own files (never overwritten by `makit rules update`).

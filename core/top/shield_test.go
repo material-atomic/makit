@@ -46,3 +46,30 @@ func TestShieldTabView(t *testing.T) {
 		t.Errorf("not-configured view:\n%s", out)
 	}
 }
+
+func TestVersionLine(t *testing.T) {
+	m := newModel("/", "", 0)
+	m.w, m.h = 150, 24
+	Version = "v0.5.0"
+	if out := ansi.Strip(m.tabsLine()); !strings.HasSuffix(strings.TrimRight(out, " "), "makit v0.5.0") {
+		t.Errorf("unknown: %q", out)
+	}
+	m.upd = updateMsg{state: updCurrent}
+	if out := ansi.Strip(m.tabsLine()); !strings.Contains(out, "● makit v0.5.0") {
+		t.Errorf("current: %q", out)
+	}
+	m.upd = updateMsg{state: updNewer, latest: "v0.6.0"}
+	if out := ansi.Strip(m.tabsLine()); !strings.Contains(out, "▲ makit v0.5.0 → v0.6.0 · run makit upgrade") {
+		t.Errorf("newer: %q", out)
+	}
+	if mm := latestRe.FindStringSubmatch("ℹ makit v0.5.0 → v0.6.0 available: https://github.com/…"); mm == nil || mm[1] != "v0.6.0" {
+		t.Errorf("parse: %v", mm)
+	}
+	m.w = 100 // too narrow for both: the version line moves to the status bar
+	if out := ansi.Strip(m.tabsLine()); strings.Contains(out, "makit upgrade") {
+		t.Errorf("narrow tabs: %q", out)
+	}
+	if out := ansi.Strip(m.statusLine()); !strings.Contains(out, "run makit upgrade") {
+		t.Errorf("narrow status: %q", out)
+	}
+}

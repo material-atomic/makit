@@ -72,7 +72,8 @@ makit init --sysctl opensearch --volume auto --mount /mnt/data --docker-volumes 
 ## makit top
 
 A terminal dashboard, no htop needed. Mouse: click tabs, click column headers to sort, scroll with the wheel, click a
-row to select it (click again to open), click buttons. Keyboard: `1`–`8`, arrows, `/` to filter, `q` to quit.
+row to select it (click again to open), click buttons. Keyboard: `1`–`8`, arrows, `/` to filter, `q` to quit. The version line on the right is green when makit is up to date and yellow when
+a newer release exists (`makit upgrade` installs it; checked at start and every 6 hours).
 
 | Tab | Shows | Actions (asks first, needs root) |
 | --- | --- | --- |

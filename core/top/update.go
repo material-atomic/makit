@@ -49,6 +49,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewer.lines = []string{"error: " + msg.err.Error()}
 			}
 		}
+	case updateMsg:
+		m.upd = msg
+	case updateTickMsg:
+		return m, tea.Batch(m.checkUpdate(), updateTick())
 	case shieldMsg:
 		m.shield.shieldMsg, m.shield.loaded = msg, true
 	case shieldDoneMsg:
