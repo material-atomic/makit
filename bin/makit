@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# makit — bootstrap and keep a fresh Ubuntu/Debian server in shape.
+set -euo pipefail
+
+self=$(readlink -f "${BASH_SOURCE[0]}")
+MAKIT_HOME=$(cd "$(dirname "$self")/.." && pwd)
+MAKIT_VERSION=$(cat "$MAKIT_HOME/VERSION" 2>/dev/null || echo dev)
+# shellcheck source=lib/common.sh
+. "$MAKIT_HOME/lib/common.sh"
+for f in "$MAKIT_HOME"/lib/cmd/*.sh; do
+  # shellcheck source=/dev/null
+  . "$f"
+done
+
+usage() {
+  cat <<USAGE
+makit $MAKIT_VERSION — bootstrap a fresh Ubuntu/Debian server.
+
+Usage: makit [--dry-run] [--yes] <command> [options]
+
+Commands:
+  init        Everything below in a safe order (start here on a new server)
+  base        Update the system and install base packages
+  upgrade     apt-get update + upgrade      (makit upgrade [--full] [--autoremove])
+  swap        Create a swap file            (makit swap [SIZE|auto])
+  sysctl      Persist kernel settings       (makit sysctl KEY=VALUE… | opensearch)
+  docker      Install Docker Engine + Compose, cap container logs
+  volume      Mount a block-storage volume  (makit volume DEVICE|auto MOUNTPOINT [--docker] [--format])
+  firewall    Allow only the given ports    (makit firewall [PORT/PROTO…])
+  updates     Enable automatic security updates
+  ssh         Disable SSH password login (only if a key is installed)
+  status      Show what makit manages on this machine
+  self-update Install another makit version (makit self-update [vX.Y.Z])
+  version     Print the version
+
+Global options:
+  --dry-run   Print what would change, change nothing
+  --yes       Answer yes to confirmations (needed for --format without a TTY)
+
+Run 'makit <command> --help' for command options.
+USAGE
+}
+
+args=()
+while [[ $# -gt 0 ]]; do
+  # shellcheck disable=SC2034 # MAKIT_DRY / MAKIT_YES are read in lib/common.sh
+  case "$1" in
+    --dry-run) MAKIT_DRY=1 ;;
+    --yes|-y)  MAKIT_YES=1 ;;
+    -h|--help) [[ ${#args[@]} -eq 0 ]] && { usage; exit 0; }; args+=("$1") ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+[[ ${#args[@]} -gt 0 ]] || { usage; exit 0; }
+
+cmd=${args[0]}; args=("${args[@]:1}")
+case "$cmd" in
+  version|--version|-v) echo "makit $MAKIT_VERSION"; exit 0 ;;
+  help) usage; exit 0 ;;
+esac
+fn="cmd_${cmd//-/_}"
+declare -F "$fn" >/dev/null || { usage >&2; die "Unknown command: $cmd"; }
+"$fn" ${args[@]+"${args[@]}"}
