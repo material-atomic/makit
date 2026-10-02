@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -28,8 +27,9 @@ type HTTPRule struct {
 		UserAgents []string          `yaml:"user_agents"`
 		Headers    map[string]string `yaml:"headers"`
 	} `yaml:"match"`
-	paths, uas []*regexp.Regexp
-	headers    map[string]*regexp.Regexp
+	paths, uas []*matcher
+	headers    map[string]*matcher
+	uaMemo     *memo[bool]
 }
 
 func (r *HTTPRule) compile() error {
@@ -40,22 +40,25 @@ func (r *HTTPRule) compile() error {
 		}
 	}
 	for _, p := range r.When.Paths {
-		re, err := regexp.Compile(p)
+		re, err := compileMatcher(p)
 		if err != nil {
 			return err
 		}
 		r.paths = append(r.paths, re)
 	}
 	for _, p := range r.When.UserAgents {
-		re, err := regexp.Compile(p)
+		re, err := compileMatcher(p)
 		if err != nil {
 			return err
 		}
 		r.uas = append(r.uas, re)
 	}
-	r.headers = map[string]*regexp.Regexp{}
+	if len(r.uas) > 0 {
+		r.uaMemo = newMemo[bool]()
+	}
+	r.headers = map[string]*matcher{}
 	for h, p := range r.When.Headers {
-		re, err := regexp.Compile(p)
+		re, err := compileMatcher(p)
 		if err != nil {
 			return err
 		}
@@ -64,9 +67,10 @@ func (r *HTTPRule) compile() error {
 	return nil
 }
 
-func anyMatch(res []*regexp.Regexp, s string) bool {
+func anyMatch(res []*matcher, s string) bool {
+	lower := strings.ToLower(s)
 	for _, re := range res {
-		if re.MatchString(s) {
+		if re.matchLower(s, lower) {
 			return true
 		}
 	}
@@ -88,7 +92,7 @@ func (r *HTTPRule) Match(q Request) bool {
 	if len(r.paths) > 0 && !anyMatch(r.paths, q.URI) {
 		return false
 	}
-	if len(r.uas) > 0 && !anyMatch(r.uas, q.UA) {
+	if len(r.uas) > 0 && !r.uaMemo.get(q.UA, func() bool { return anyMatch(r.uas, q.UA) }) {
 		return false
 	}
 	for h, re := range r.headers {

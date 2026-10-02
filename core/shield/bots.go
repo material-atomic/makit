@@ -15,7 +15,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -39,8 +38,8 @@ type Agent struct {
 		Ranges []string `yaml:"ranges" json:"ranges,omitempty"`
 	} `yaml:"verify" json:"verify"`
 	ByIP   bool `yaml:"-" json:"by_ip,omitempty"` // identified by IP alone (agents from your own sources)
-	ua     *regexp.Regexp
-	hdr    map[string]*regexp.Regexp
+	ua     *matcher
+	hdr    map[string]*matcher
 	feeds  []feed         // published or maintainer IP range URLs
 	manual []netip.Prefix // IPs typed by the maintainer
 }
@@ -69,6 +68,7 @@ type BotCatalog struct {
 	Categories   map[string]BotCategory `yaml:"categories"`
 	Spoofed      string                 `yaml:"spoofed"`
 	byID         map[string]*Agent
+	uaMemo       *memo[int]          // per User-Agent: index of the first agent whose ua matches, -1 none
 	RobotsTokens map[string][]string `yaml:"robots_tokens"`
 	Agents       []*Agent            `yaml:"agents"`
 	policy       map[string]Act      // effective: category ids, agent ids and "spoofed"
@@ -134,7 +134,7 @@ func LoadBotsConfig(dirs []string, cfg BotsConfig) (*BotCatalog, error) {
 	if err != nil || refresh < time.Hour {
 		return nil, fmt.Errorf("bots.refresh %q: a duration of 1h or more", cfg.Refresh)
 	}
-	bc.byID = map[string]*Agent{}
+	bc.byID, bc.uaMemo = map[string]*Agent{}, newMemo[int]()
 	for _, a := range bc.Agents {
 		if a.ID == "" || bc.byID[a.ID] != nil {
 			return nil, fmt.Errorf("agent %q: missing or duplicate id", a.ID)
@@ -144,15 +144,15 @@ func LoadBotsConfig(dirs []string, cfg BotsConfig) (*BotCatalog, error) {
 			return nil, fmt.Errorf("agent %s: unknown category %q", a.ID, a.Category)
 		}
 		if a.UA != "" {
-			if a.ua, err = regexp.Compile(a.UA); err != nil {
+			if a.ua, err = compileMatcher(a.UA); err != nil {
 				return nil, fmt.Errorf("agent %s: %w", a.ID, err)
 			}
 		}
 		for h, m := range a.Header {
 			if a.hdr == nil {
-				a.hdr = map[string]*regexp.Regexp{}
+				a.hdr = map[string]*matcher{}
 			}
-			if a.hdr[strings.ToLower(h)], err = regexp.Compile(m); err != nil {
+			if a.hdr[strings.ToLower(h)], err = compileMatcher(m); err != nil {
 				return nil, fmt.Errorf("agent %s header %s: %w", a.ID, h, err)
 			}
 		}
@@ -250,15 +250,30 @@ func botRangeOK(p netip.Prefix) bool {
 
 // Identify returns the first agent whose User-Agent or header pattern matches.
 func (bc *BotCatalog) Identify(r Request) *Agent {
-	for _, a := range bc.Agents {
-		if a.ua != nil && a.ua.MatchString(r.UA) {
-			return a
-		}
-		for h, re := range a.hdr {
-			if v, ok := r.Headers[h]; ok && re.MatchString(v) {
-				return a
+	first := bc.uaMemo.get(r.UA, func() int {
+		lower := strings.ToLower(r.UA)
+		for i, a := range bc.Agents {
+			if a.ua != nil && a.ua.matchLower(r.UA, lower) {
+				return i
 			}
 		}
+		return -1
+	})
+	if len(r.Headers) > 0 { // header-identified agents (signed AI agents) that come before the UA match
+		end := len(bc.Agents)
+		if first >= 0 {
+			end = first
+		}
+		for _, a := range bc.Agents[:end] {
+			for h, re := range a.hdr {
+				if v, ok := r.Headers[h]; ok && re.MatchString(v) {
+					return a
+				}
+			}
+		}
+	}
+	if first >= 0 {
+		return bc.Agents[first]
 	}
 	return nil
 }

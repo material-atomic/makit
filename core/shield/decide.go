@@ -184,8 +184,9 @@ func (p *Policy) Decide(r Request) Decision {
 			return block("rule:"+rule.ID, rule.Title)
 		}
 	}
+	q := newScored(&r, 0) // decoded fields, shared by the attack score and the bot score
 	if p.Scoring != nil {
-		score, hits := p.Scoring.ScoreRequest(r, 0)
+		score, hits := p.Scoring.score(q)
 		if p.Tracker != nil {
 			ipScore, bursts := p.Tracker.Observe(client, score, hits, 0, now)
 			hits = append(hits, bursts...)
@@ -199,7 +200,7 @@ func (p *Policy) Decide(r Request) Decision {
 		}
 	}
 	if p.BotScore != nil && d.Bot == nil {
-		score, hits := p.BotScore.ScoreRequest(r, 0)
+		score, hits := p.BotScore.score(q)
 		if p.BotTracker != nil {
 			ipScore, bursts := p.BotTracker.Observe(client, score, hits, 0, now)
 			hits = append(hits, bursts...)

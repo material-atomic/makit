@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +33,7 @@ type Scoring struct {
 	Signals  []Signal        `yaml:"signals"`
 	Bursts   []Burst         `yaml:"bursts"`
 	Window   time.Duration   `yaml:"-"`
+	uaMemo   *memo[[]bool]   // per User-Agent: which "ua" signals match
 }
 
 type Signal struct {
@@ -47,7 +47,9 @@ type Signal struct {
 		Field string `yaml:"field"`
 		Match string `yaml:"match"`
 	} `yaml:"also"`
-	re, alsoRe *regexp.Regexp
+	re, alsoRe   *matcher
+	ref, alsoRef fieldRef
+	hit          string // "id+score", as reported
 }
 
 type Burst struct {
@@ -57,7 +59,7 @@ type Burst struct {
 	Count int    `yaml:"count"`
 	Score int    `yaml:"score"`
 	Label string `yaml:"label"`
-	re    *regexp.Regexp
+	re    *matcher
 }
 
 // ScoringOverrides come from shield.yaml (scoring:): per-server profiles, actions and disabled signals.
@@ -126,11 +128,20 @@ func LoadScoringSet(dirs []string, name, file string, o ScoringOverrides) (*Scor
 		if off[s.ID] || (s.UnlessProfile != "" && sc.Profiles[s.UnlessProfile]) {
 			continue
 		}
-		if s.re, err = regexp.Compile(s.Match); err != nil {
+		if s.ref, err = parseField(s.Field); err != nil {
+			return nil, fmt.Errorf("signal %s: %w", s.ID, err)
+		}
+		s.hit = fmt.Sprintf("%s+%d", s.ID, s.Score)
+		if s.Also != nil {
+			if s.alsoRef, err = parseField(s.Also.Field); err != nil {
+				return nil, fmt.Errorf("signal %s: %w", s.ID, err)
+			}
+		}
+		if s.re, err = compileMatcher(s.Match); err != nil {
 			return nil, fmt.Errorf("signal %s: %w", s.ID, err)
 		}
 		if s.Also != nil {
-			if s.alsoRe, err = regexp.Compile(s.Also.Match); err != nil {
+			if s.alsoRe, err = compileMatcher(s.Also.Match); err != nil {
 				return nil, fmt.Errorf("signal %s: %w", s.ID, err)
 			}
 		}
@@ -143,13 +154,14 @@ func LoadScoringSet(dirs []string, name, file string, o ScoringOverrides) (*Scor
 			continue
 		}
 		if b.Match != "" {
-			if b.re, err = regexp.Compile(b.Match); err != nil {
+			if b.re, err = compileMatcher(b.Match); err != nil {
 				return nil, fmt.Errorf("burst %s: %w", b.ID, err)
 			}
 		}
 		bs = append(bs, b)
 	}
 	sc.Bursts = bs
+	sc.uaMemo = newMemo[[]bool]()
 	if len(sc.LevelOrder) == 0 {
 		sc.LevelOrder = []string{"low", "medium", "high", "critical"}
 	}
@@ -199,59 +211,176 @@ func percentDecode(s string) string {
 	return b.String()
 }
 
+// Fields a signal can test. They are resolved to ids when the scoring set loads, so a request never looks a field up
+// by name, and computed lazily, once per request, shared by the attack score and the bot score.
+type fieldID uint8
+
+const (
+	fMethod fieldID = iota
+	fPath
+	fQuery
+	fPathQuery
+	fUA
+	fHost
+	fReferer
+	fRaw
+	fStatus
+	fAny
+	fHeader
+	nFields
+)
+
+var fieldNames = map[string]fieldID{"method": fMethod, "path": fPath, "query": fQuery, "path+query": fPathQuery,
+	"ua": fUA, "host": fHost, "referer": fReferer, "raw": fRaw, "status": fStatus, "any": fAny}
+
+type fieldRef struct {
+	id  fieldID
+	hdr string // fHeader: lower-case header name
+}
+
+func parseField(f string) (fieldRef, error) {
+	if h, ok := strings.CutPrefix(f, "header:"); ok && h != "" {
+		return fieldRef{id: fHeader, hdr: strings.ToLower(h)}, nil
+	}
+	if id, ok := fieldNames[f]; ok {
+		return fieldRef{id: id}, nil
+	}
+	return fieldRef{}, fmt.Errorf("unknown field %q (method, path, query, path+query, ua, host, referer, raw, status, any, header:NAME)", f)
+}
+
 type scoredRequest struct {
-	fields     map[string]string
-	hasHeaders bool
+	r       *Request
+	status  int
+	have    [nFields]bool
+	val     [nFields]string
+	lowHave [nFields]bool
+	low     [nFields]string
+	hdrLow  map[string]string
 }
 
-// get returns a field; a header the client did not send is "" when headers are known (so '^$' means "missing").
-func (q scoredRequest) get(field string) (string, bool) {
-	v, ok := q.fields[field]
-	if !ok && q.hasHeaders && strings.HasPrefix(field, "header:") {
-		return "", true
+func newScored(r *Request, status int) *scoredRequest { return &scoredRequest{r: r, status: status} }
+
+// value returns a field; a header the client did not send is "" when headers are known (so '^$' means "missing"),
+// and absent when they are not (log lines).
+func (q *scoredRequest) value(f fieldRef) (string, bool) {
+	r := q.r
+	switch f.id {
+	case fHeader:
+		if r.Headers == nil {
+			return "", false
+		}
+		return r.Headers[f.hdr], true
+	case fStatus:
+		if q.status <= 0 {
+			return "", false
+		}
 	}
-	return v, ok
+	if q.have[f.id] {
+		return q.val[f.id], true
+	}
+	var v string
+	switch f.id {
+	case fMethod:
+		v = r.Method
+	case fPath, fQuery:
+		path, query, _ := strings.Cut(r.URI, "?")
+		q.val[fPath], q.val[fQuery] = decode(path), decode(query)
+		q.have[fPath], q.have[fQuery] = true, true
+		return q.val[f.id], true
+	case fPathQuery:
+		p, _ := q.value(fieldRef{id: fPath})
+		qs, _ := q.value(fieldRef{id: fQuery})
+		v = p + "?" + qs
+	case fUA:
+		v = r.UA
+	case fHost:
+		v = r.Host
+	case fReferer:
+		v = decode(r.Referer)
+	case fRaw:
+		v = r.Raw
+		if v == "" {
+			v = r.Method + " " + r.URI
+		}
+	case fStatus:
+		v = strconv.Itoa(q.status)
+	case fAny:
+		p, _ := q.value(fieldRef{id: fPath})
+		qs, _ := q.value(fieldRef{id: fQuery})
+		ref, _ := q.value(fieldRef{id: fReferer})
+		var b strings.Builder
+		b.WriteString(p)
+		for _, x := range []string{qs, r.UA, ref} {
+			b.WriteByte('\n')
+			b.WriteString(x)
+		}
+		for _, x := range r.Headers {
+			b.WriteByte('\n')
+			b.WriteString(x)
+		}
+		v = b.String()
+	}
+	q.val[f.id], q.have[f.id] = v, true
+	return v, true
 }
 
-func fieldsOf(r Request, status int) scoredRequest {
-	path, query, _ := strings.Cut(r.URI, "?")
-	path, query = decode(path), decode(query)
-	raw := r.Raw
-	if raw == "" {
-		raw = r.Method + " " + r.URI
+func (q *scoredRequest) match(m *matcher, f fieldRef, v string) bool {
+	if m.lits == nil {
+		return m.re.MatchString(v)
 	}
-	f := map[string]string{"method": r.Method, "path": path, "query": query, "path+query": path + "?" + query,
-		"ua": r.UA, "host": r.Host, "referer": decode(r.Referer), "raw": raw}
-	if status > 0 {
-		f["status"] = strconv.Itoa(status)
+	var l string
+	if f.id == fHeader {
+		if q.hdrLow == nil {
+			q.hdrLow = map[string]string{}
+		}
+		var ok bool
+		if l, ok = q.hdrLow[f.hdr]; !ok {
+			l = strings.ToLower(v)
+			q.hdrLow[f.hdr] = l
+		}
+	} else {
+		if !q.lowHave[f.id] {
+			q.low[f.id], q.lowHave[f.id] = strings.ToLower(v), true
+		}
+		l = q.low[f.id]
 	}
-	any := []string{path, query, r.UA, f["referer"]}
-	for k, v := range r.Headers {
-		f["header:"+k] = v
-		any = append(any, v)
-	}
-	f["any"] = strings.Join(any, "\n")
-	return scoredRequest{f, r.Headers != nil}
+	return m.matchLower(v, l)
 }
 
 // ScoreRequest adds the points of every matching signal (once each), capped at 200.
 func (sc *Scoring) ScoreRequest(r Request, status int) (int, []string) {
-	q := fieldsOf(r, status)
+	return sc.score(newScored(&r, status))
+}
+
+func (sc *Scoring) score(q *scoredRequest) (int, []string) {
+	uaHits := sc.uaMemo.get(q.r.UA, func() []bool {
+		m := make([]bool, len(sc.Signals))
+		for i, s := range sc.Signals {
+			if s.ref.id == fUA {
+				m[i] = q.match(s.re, s.ref, q.r.UA)
+			}
+		}
+		return m
+	})
 	total := 0
 	var hits []string
-	for _, s := range sc.Signals {
-		v, ok := q.get(s.Field)
-		if !ok || !s.re.MatchString(v) {
+	for i := range sc.Signals {
+		s := &sc.Signals[i]
+		if s.ref.id == fUA {
+			if !uaHits[i] {
+				continue
+			}
+		} else if v, ok := q.value(s.ref); !ok || !q.match(s.re, s.ref, v) {
 			continue
 		}
 		if s.Also != nil {
-			av, ok := q.get(s.Also.Field)
-			if !ok || !s.alsoRe.MatchString(av) {
+			av, ok := q.value(s.alsoRef)
+			if !ok || !q.match(s.alsoRe, s.alsoRef, av) {
 				continue
 			}
 		}
 		total += s.Score
-		hits = append(hits, fmt.Sprintf("%s+%d", s.ID, s.Score))
+		hits = append(hits, s.hit)
 	}
 	return min(total, 200), hits
 }
