@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/material-atomic/makit/core/notify"
 	"github.com/material-atomic/makit/core/scan"
 	"github.com/material-atomic/makit/core/shield"
 	"github.com/material-atomic/makit/core/top"
@@ -39,6 +40,8 @@ func main() {
 		}
 	case "scan":
 		os.Exit(scan.Main(args))
+	case "notify":
+		os.Exit(notify.Main(args))
 	case "shield":
 		os.Exit(shield.Main(args, scan.CatalogDirs()))
 	default:
