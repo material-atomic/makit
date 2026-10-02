@@ -1,7 +1,11 @@
 package shield
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,11 +38,24 @@ type Agent struct {
 		RDNS   []string `yaml:"rdns" json:"rdns,omitempty"`
 		Ranges []string `yaml:"ranges" json:"ranges,omitempty"`
 	} `yaml:"verify" json:"verify"`
-	ua  *regexp.Regexp
-	hdr map[string]*regexp.Regexp
+	ByIP   bool `yaml:"-" json:"by_ip,omitempty"` // identified by IP alone (agents from your own sources)
+	ua     *regexp.Regexp
+	hdr    map[string]*regexp.Regexp
+	feeds  []feed         // published or maintainer IP range URLs
+	manual []netip.Prefix // IPs typed by the maintainer
 }
 
-func (a *Agent) Verifiable() bool { return len(a.Verify.RDNS) > 0 || len(a.Verify.Ranges) > 0 }
+// feed is one URL of IP ranges, cached in the state directory and refreshed every Every.
+type feed struct {
+	URL    string
+	Every  time.Duration
+	File   string
+	Custom bool
+}
+
+func (a *Agent) Verifiable() bool {
+	return len(a.Verify.RDNS) > 0 || len(a.feeds) > 0 || len(a.manual) > 0
+}
 
 type BotCategory struct {
 	Label  string `yaml:"label" json:"label"`
@@ -51,9 +68,10 @@ type BotCatalog struct {
 	Doc          string                 `yaml:"doc"`
 	Categories   map[string]BotCategory `yaml:"categories"`
 	Spoofed      string                 `yaml:"spoofed"`
-	RobotsTokens map[string][]string    `yaml:"robots_tokens"`
-	Agents       []*Agent               `yaml:"agents"`
-	policy       map[string]Act         // effective: category ids, agent ids and "spoofed"
+	byID         map[string]*Agent
+	RobotsTokens map[string][]string `yaml:"robots_tokens"`
+	Agents       []*Agent            `yaml:"agents"`
+	policy       map[string]Act      // effective: category ids, agent ids and "spoofed"
 }
 
 // BotsConfig is shield.yaml → bots:.
@@ -64,19 +82,38 @@ type BotsConfig struct {
 	File      string            `yaml:"file"`       // your own agents file instead of the catalog's (same format)
 	Score     ScoringOverrides  `yaml:"score"`      // bot score: enabled, actions per level, disable
 	ScoreFile string            `yaml:"score_file"` // your own bot scoring file (same format as scoring/bots.yaml)
+	Refresh   string            `yaml:"refresh"`    // how often published ranges are downloaded again (default 24h)
+	Sources   []BotSource       `yaml:"sources"`    // your own IP ranges for bots: URLs refreshed on a schedule, or typed IPs
+}
+
+// BotSource adds IP ranges to an agent — one of the catalog's, or a new one (then category is required and the agent
+// is recognised by IP alone: partners' crawlers, your monitoring).
+type BotSource struct {
+	Agent    string   `yaml:"agent"`
+	Name     string   `yaml:"name,omitempty"`
+	Category string   `yaml:"category,omitempty"`
+	URL      string   `yaml:"url,omitempty"`   // JSON ({"prefixes":[…]} or any JSON with IPs/CIDRs), or text (one per line, comments ok)
+	Every    string   `yaml:"every,omitempty"` // refresh interval for url (default: refresh)
+	IPs      []string `yaml:"ips,omitempty"`   // typed by hand
+	ByIP     *bool    `yaml:"by_ip,omitempty"` // recognise the agent by IP even without its User-Agent (default: only for new agents)
 }
 
 // LoadBots reads <dir>/bots/agents.yaml (the last one found wins, or file when set) and applies the policy.
 func LoadBots(dirs []string, file string, policy map[string]string) (*BotCatalog, error) {
+	return LoadBotsConfig(dirs, BotsConfig{File: file, Policy: policy})
+}
+
+// LoadBotsConfig loads the catalog, adds the maintainer's sources and applies the policy.
+func LoadBotsConfig(dirs []string, cfg BotsConfig) (*BotCatalog, error) {
 	paths := []string{}
 	for _, d := range dirs {
 		paths = append(paths, filepath.Join(d, "bots", "agents.yaml"))
 	}
-	if file != "" {
-		if _, err := os.Stat(file); err != nil {
+	if cfg.File != "" {
+		if _, err := os.Stat(cfg.File); err != nil {
 			return nil, fmt.Errorf("bots.file: %w", err)
 		}
-		paths = []string{file}
+		paths = []string{cfg.File}
 	}
 	var bc *BotCatalog
 	for _, f := range paths {
@@ -93,16 +130,19 @@ func LoadBots(dirs []string, file string, policy map[string]string) (*BotCatalog
 	if bc == nil {
 		return nil, nil
 	}
-	seen := map[string]bool{}
+	refresh, err := parseDur(firstNonEmpty(cfg.Refresh, "24h"))
+	if err != nil || refresh < time.Hour {
+		return nil, fmt.Errorf("bots.refresh %q: a duration of 1h or more", cfg.Refresh)
+	}
+	bc.byID = map[string]*Agent{}
 	for _, a := range bc.Agents {
-		if a.ID == "" || seen[a.ID] {
+		if a.ID == "" || bc.byID[a.ID] != nil {
 			return nil, fmt.Errorf("agent %q: missing or duplicate id", a.ID)
 		}
-		seen[a.ID] = true
+		bc.byID[a.ID] = a
 		if _, ok := bc.Categories[a.Category]; !ok {
 			return nil, fmt.Errorf("agent %s: unknown category %q", a.ID, a.Category)
 		}
-		var err error
 		if a.UA != "" {
 			if a.ua, err = regexp.Compile(a.UA); err != nil {
 				return nil, fmt.Errorf("agent %s: %w", a.ID, err)
@@ -118,6 +158,49 @@ func LoadBots(dirs []string, file string, policy map[string]string) (*BotCatalog
 		}
 		if a.ua == nil && a.hdr == nil {
 			return nil, fmt.Errorf("agent %s: needs ua or header", a.ID)
+		}
+		for _, u := range a.Verify.Ranges {
+			a.feeds = append(a.feeds, feed{URL: u, Every: refresh, File: feedFile(a.ID, u)})
+		}
+	}
+	for i, src := range cfg.Sources {
+		where := fmt.Sprintf("bots.sources[%d]", i)
+		if !validName(src.Agent) {
+			return nil, fmt.Errorf("%s: agent %q: letters, digits, - and _", where, src.Agent)
+		}
+		a := bc.byID[src.Agent]
+		if a == nil {
+			if _, ok := bc.Categories[src.Category]; !ok {
+				return nil, fmt.Errorf("%s: %s is a new agent — give it a category (makit shield bots)", where, src.Agent)
+			}
+			a = &Agent{ID: src.Agent, Name: firstNonEmpty(src.Name, src.Agent), Category: src.Category, Operator: "your source", ByIP: true}
+			bc.Agents = append(bc.Agents, a)
+			bc.byID[a.ID] = a
+		}
+		if src.ByIP != nil {
+			a.ByIP = *src.ByIP
+		}
+		if src.URL != "" {
+			if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") {
+				return nil, fmt.Errorf("%s: url must be http(s)", where)
+			}
+			every := refresh
+			if src.Every != "" {
+				if every, err = parseDur(src.Every); err != nil || every < 5*time.Minute {
+					return nil, fmt.Errorf("%s: every %q: a duration of 5m or more", where, src.Every)
+				}
+			}
+			a.feeds = append(a.feeds, feed{URL: src.URL, Every: every, File: feedFile(a.ID, src.URL), Custom: true})
+		}
+		for _, ip := range src.IPs {
+			p, err := ParsePrefix(ip)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", where, err)
+			}
+			if !botRangeOK(p) {
+				return nil, fmt.Errorf("%s: %s is too wide for a bot (narrower than /8 IPv4, /32 IPv6)", where, p)
+			}
+			a.manual = append(a.manual, p)
 		}
 	}
 	bc.policy = map[string]Act{}
@@ -137,8 +220,8 @@ func LoadBots(dirs []string, file string, policy map[string]string) (*BotCatalog
 	if err := set("spoofed", firstNonEmpty(bc.Spoofed, "block"), "spoofed"); err != nil {
 		return nil, err
 	}
-	for k, v := range policy {
-		if _, isCat := bc.Categories[k]; !isCat && k != "spoofed" && !seen[k] {
+	for k, v := range cfg.Policy {
+		if _, isCat := bc.Categories[k]; !isCat && k != "spoofed" && bc.byID[k] == nil {
 			return nil, fmt.Errorf("bots.policy: %q is not a category, an agent id or spoofed (makit shield bots)", k)
 		}
 		if err := set(k, v, "bots.policy"); err != nil {
@@ -146,6 +229,23 @@ func LoadBots(dirs []string, file string, policy map[string]string) (*BotCatalog
 		}
 	}
 	return bc, nil
+}
+
+// Agent returns the agent with this id (nil if none).
+func (bc *BotCatalog) Agent(id string) *Agent { return bc.byID[id] }
+
+// feedFile is the cache file of one URL: bots/<agent>@<hash>.txt.
+func feedFile(agent, url string) string {
+	h := sha256.Sum256([]byte(url))
+	return agent + "@" + hex.EncodeToString(h[:4]) + ".txt"
+}
+
+// botRangeOK refuses ranges so wide that a bad feed would turn a large part of the internet into a "verified" bot.
+func botRangeOK(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Bits() >= 8
+	}
+	return p.Bits() >= 32
 }
 
 // Identify returns the first agent whose User-Agent or header pattern matches.
@@ -200,7 +300,8 @@ type verdict struct {
 type Verifier struct {
 	mu         sync.Mutex
 	cache      map[string]verdict
-	ranges     map[string]*Set // agent id → published ranges
+	ranges     map[string]*Set // agent id → published, maintainer and typed ranges
+	byIP       *Set            // agents recognised by IP alone (Entry.Source = agent id)
 	inflight   map[string]bool
 	Sync       bool
 	LookupAddr func(ctx context.Context, ip string) ([]string, error)
@@ -217,24 +318,57 @@ func NewVerifier() *Verifier {
 
 func botsDir() string { return filepath.Join(StateDir, "bots") }
 
-// LoadRanges reads the cached ranges of every agent (bots/<id>.txt).
+// LoadRanges reads every agent's cached feeds and typed IPs into one set per agent, plus one index of the agents
+// recognised by IP alone. Both are hash-per-prefix-length sets: lookups stay fast with millions of entries.
 func (v *Verifier) LoadRanges(bc *BotCatalog) {
-	m := map[string]*Set{}
+	m, idx := map[string]*Set{}, NewSet()
 	for _, a := range bc.Agents {
-		if len(a.Verify.Ranges) == 0 {
-			continue
+		ps := append([]netip.Prefix(nil), a.manual...)
+		for _, f := range a.feeds {
+			got, _ := ReadPrefixes(filepath.Join(botsDir(), f.File))
+			for _, p := range got {
+				if botRangeOK(p) {
+					ps = append(ps, p)
+				}
+			}
 		}
-		ps, err := ReadPrefixes(filepath.Join(botsDir(), a.ID+".txt"))
-		if err != nil || len(ps) == 0 {
+		if len(ps) == 0 {
 			continue
 		}
 		s := NewSet()
 		s.AddMany(ps, time.Time{}, "", "bot:"+a.ID)
 		m[a.ID] = s
+		if a.ByIP {
+			idx.AddMany(ps, time.Time{}, "", a.ID)
+		}
 	}
 	v.mu.Lock()
-	v.ranges = m
+	v.ranges, v.byIP = m, idx
 	v.mu.Unlock()
+}
+
+// ByIP returns the id of the agent (recognised by IP) that owns this address, or "".
+func (v *Verifier) ByIP(ip netip.Addr, now time.Time) string {
+	v.mu.Lock()
+	idx := v.byIP
+	v.mu.Unlock()
+	if idx == nil {
+		return ""
+	}
+	if e, ok := idx.Match(ip, now); ok {
+		return e.Source
+	}
+	return ""
+}
+
+// RangeCount is the number of prefixes loaded for an agent.
+func (v *Verifier) RangeCount(id string) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if s := v.ranges[id]; s != nil {
+		return s.Len()
+	}
+	return 0
 }
 
 // Check returns verified, claimed, pending, unknown or spoofed.
@@ -364,69 +498,151 @@ func (l *Limiter) Allow(key string, act Act, now time.Time) bool {
 
 // ── published ranges ──
 
-// UpdateBotRanges downloads every agent's published ranges into the state directory.
+// FeedStatus is the last download of one feed (bots/status.json).
+type FeedStatus struct {
+	Agent   string    `json:"agent"`
+	URL     string    `json:"url"`
+	Count   int       `json:"count"`
+	Skipped int       `json:"skipped,omitempty"` // entries refused (too wide, unparsable)
+	OK      time.Time `json:"ok,omitempty"`
+	Tried   time.Time `json:"tried"`
+	Error   string    `json:"error,omitempty"`
+}
+
+func readFeedStatus() map[string]FeedStatus {
+	m := map[string]FeedStatus{}
+	if b, err := os.ReadFile(filepath.Join(botsDir(), "status.json")); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	return m
+}
+
+var refreshMu sync.Mutex
+
+// RefreshBotRanges downloads the feeds that are due (all of them with force, or only one agent's with only) and
+// reports what changed. A failed download keeps the previous file and is retried after an hour.
+func RefreshBotRanges(bc *BotCatalog, force bool, only string) ([]FeedStatus, error) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	if err := os.MkdirAll(botsDir(), 0o755); err != nil {
+		return nil, err
+	}
+	status := readFeedStatus()
+	cl := &http.Client{Timeout: 60 * time.Second}
+	now := time.Now()
+	var done []FeedStatus
+	for _, a := range bc.Agents {
+		if only != "" && a.ID != only {
+			continue
+		}
+		for _, f := range a.feeds {
+			st := status[f.File]
+			path := filepath.Join(botsDir(), f.File)
+			if !force {
+				info, err := os.Stat(path)
+				if err == nil && now.Sub(info.ModTime()) < f.Every {
+					continue // fresh
+				}
+				if st.Error != "" && now.Sub(st.Tried) < time.Hour {
+					continue // failed recently
+				}
+			}
+			st.Agent, st.URL, st.Tried, st.Error = a.ID, f.URL, now, ""
+			ps, skipped, err := fetchRanges(cl, f.URL)
+			if err == nil && len(ps) == 0 {
+				err = fmt.Errorf("no IPs or ranges found")
+			}
+			if err == nil {
+				err = writePrefixes(path, f.URL, ps)
+			}
+			if err != nil {
+				st.Error = err.Error()
+			} else {
+				st.Count, st.Skipped, st.OK = len(ps), skipped, now
+			}
+			status[f.File] = st
+			done = append(done, st)
+		}
+	}
+	if len(done) > 0 {
+		b, _ := json.MarshalIndent(status, "", "  ")
+		_ = os.WriteFile(filepath.Join(botsDir(), "status.json"), b, 0o644)
+	}
+	return done, nil
+}
+
+// UpdateBotRanges downloads every feed now.
 func UpdateBotRanges(bc *BotCatalog) (map[string]int, []error) {
 	out, errs := map[string]int{}, []error(nil)
-	if err := os.MkdirAll(botsDir(), 0o755); err != nil {
+	done, err := RefreshBotRanges(bc, true, "")
+	if err != nil {
 		return out, []error{err}
 	}
-	cl := &http.Client{Timeout: 20 * time.Second}
-	for _, a := range bc.Agents {
-		if len(a.Verify.Ranges) == 0 {
+	for _, st := range done {
+		if st.Error != "" {
+			errs = append(errs, fmt.Errorf("%s %s: %s", st.Agent, st.URL, st.Error))
 			continue
 		}
-		var lines []string
-		var failed error
-		for _, u := range a.Verify.Ranges {
-			ps, err := fetchRanges(cl, u)
-			if err != nil {
-				failed = fmt.Errorf("%s: %w", a.ID, err)
-				break
-			}
-			lines = append(lines, ps...)
-		}
-		if failed != nil || len(lines) == 0 {
-			if failed == nil {
-				failed = fmt.Errorf("%s: no ranges found", a.ID)
-			}
-			errs = append(errs, failed) // keep the previous file
-			continue
-		}
-		path := filepath.Join(botsDir(), a.ID+".txt")
-		body := "# " + strings.Join(a.Verify.Ranges, " ") + " — " + time.Now().UTC().Format(time.RFC3339) + "\n" + strings.Join(lines, "\n") + "\n"
-		if err := os.WriteFile(path+".tmp", []byte(body), 0o644); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := os.Rename(path+".tmp", path); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		out[a.ID] = len(lines)
+		out[st.Agent] += st.Count
 	}
 	return out, errs
 }
 
-func fetchRanges(cl *http.Client, u string) ([]string, error) {
+func writePrefixes(path, src string, ps []netip.Prefix) error {
+	f, err := os.Create(path + ".tmp")
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriterSize(f, 1<<20)
+	fmt.Fprintf(w, "# %s — %s\n", src, time.Now().UTC().Format(time.RFC3339))
+	for _, p := range ps {
+		w.WriteString(p.String())
+		w.WriteByte('\n')
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+func fetchRanges(cl *http.Client, u string) ([]netip.Prefix, int, error) {
 	res, err := cl.Get(u)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("%s: %s", u, res.Status)
+		return nil, 0, fmt.Errorf("%s", res.Status)
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	b, err := io.ReadAll(io.LimitReader(res.Body, 256<<20))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return parseRanges(b), nil
+	ps, skipped := parseRanges(b)
+	return ps, skipped, nil
 }
 
-// parseRanges accepts the common JSON shape ({"prefixes":[{"ipv4Prefix":…}]}), any JSON holding CIDR strings, or
-// plain lines.
-func parseRanges(b []byte) []string {
-	var out []string
+// parseRanges accepts the common JSON shape ({"prefixes":[{"ipv4Prefix":…}]}), any JSON holding IP/CIDR strings, or
+// text with one or more IPs/CIDRs per line (comments after # or ; and CSV columns are fine). Ranges wider than /8
+// (IPv4) or /32 (IPv6) are skipped and counted.
+func parseRanges(b []byte) ([]netip.Prefix, int) {
+	var out []netip.Prefix
+	skipped := 0
+	add := func(tok string) {
+		p, err := ParsePrefix(tok)
+		if err != nil {
+			return
+		}
+		if !botRangeOK(p) {
+			skipped++
+			return
+		}
+		out = append(out, p)
+	}
 	var walk func(x any)
 	walk = func(x any) {
 		switch t := x.(type) {
@@ -439,22 +655,40 @@ func parseRanges(b []byte) []string {
 				walk(v)
 			}
 		case string:
-			if p, err := ParsePrefix(t); err == nil && strings.Contains(t, "/") {
-				out = append(out, p.String())
-			}
+			add(t)
 		}
 	}
 	var j any
-	if json.Unmarshal(b, &j) == nil {
-		walk(j)
-	} else {
-		for _, l := range strings.Fields(string(b)) {
-			if p, err := ParsePrefix(l); err == nil {
-				out = append(out, p.String())
-			}
+	if bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) || bytes.HasPrefix(bytes.TrimSpace(b), []byte("[")) {
+		if json.Unmarshal(b, &j) == nil {
+			walk(j)
+			return dedupe(out), skipped
 		}
 	}
-	sort.Strings(out)
+	for _, line := range strings.Split(string(b), "\n") {
+		if i := strings.IndexAny(line, "#;"); i >= 0 {
+			line = line[:i]
+		}
+		for _, tok := range strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\r' || r == '"' }) {
+			add(tok)
+		}
+	}
+	return dedupe(out), skipped
+}
+
+func dedupe(ps []netip.Prefix) []netip.Prefix {
+	sort.Slice(ps, func(i, j int) bool {
+		if c := ps[i].Addr().Compare(ps[j].Addr()); c != 0 {
+			return c < 0
+		}
+		return ps[i].Bits() < ps[j].Bits()
+	})
+	out := ps[:0]
+	for i, p := range ps {
+		if i == 0 || p != ps[i-1] {
+			out = append(out, p)
+		}
+	}
 	return out
 }
 

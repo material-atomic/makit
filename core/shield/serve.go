@@ -49,7 +49,7 @@ func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error
 		}
 	}
 	if b := cfg.Bots; b.Enabled == nil || *b.Enabled {
-		if p.Bots, err = LoadBots(dirs, b.File, b.Policy); err != nil {
+		if p.Bots, err = LoadBotsConfig(dirs, b); err != nil {
 			return nil, nil, err
 		}
 		if b.Score.Enabled == nil || *b.Score.Enabled {
@@ -175,7 +175,10 @@ func Serve(cfgPath string, dirs []string) error {
 	var lists *Set
 	var listsFP string
 	kernelWasOn := false
+	var loadMu sync.Mutex // reloads come from the poller, SIGHUP and feed downloads
 	load := func() error {
+		loadMu.Lock()
+		defer loadMu.Unlock()
 		c, err := LoadConfig(cfgPath)
 		if err != nil {
 			return err
@@ -260,6 +263,28 @@ func Serve(cfgPath string, dirs []string) error {
 	go func() { _ = asrv.Serve(admin) }()
 
 	// Reload on SIGHUP and whenever the state file changes (makit shield ban/allow…); refresh Cloudflare ranges daily.
+	// Bot IP feeds (published ranges and your own URLs) are downloaded when due; the policy reloads when one changed.
+	refreshFeeds := func() {
+		p := g.policy.Load()
+		if p == nil || p.Bots == nil {
+			return
+		}
+		done, _ := RefreshBotRanges(p.Bots, false, "")
+		changed := false
+		for _, st := range done {
+			if st.Error != "" {
+				log.Printf("shield: bot feed %s %s: %s (kept the previous list)", st.Agent, st.URL, st.Error)
+			} else {
+				changed = true
+			}
+		}
+		if changed {
+			if err := load(); err != nil {
+				log.Printf("shield: reload: %v", err)
+			}
+		}
+	}
+	feeds := time.NewTicker(5 * time.Minute)
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
@@ -271,7 +296,7 @@ func Serve(cfgPath string, dirs []string) error {
 			lastCfg = st.ModTime()
 		}
 		tick, daily := time.NewTicker(2*time.Second), time.NewTicker(24*time.Hour)
-		catFP := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile)
+		catFP := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile, filepath.Join(botsDir(), "status.json"))
 		for {
 			select {
 			case <-ctx.Done():
@@ -291,7 +316,7 @@ func Serve(cfgPath string, dirs []string) error {
 				if listsFingerprint() != listsFP {
 					changed = true
 				}
-				if fp := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile); fp != catFP {
+				if fp := catalogFingerprint(dirs, cfg.Scoring.File, cfg.Bots.File, cfg.Bots.ScoreFile, filepath.Join(botsDir(), "status.json")); fp != catFP {
 					catFP, changed = fp, true // a customized scoring/bots/rules file was edited
 				}
 				if changed {
@@ -301,21 +326,13 @@ func Serve(cfgPath string, dirs []string) error {
 				}
 			case <-daily.C:
 				_, _ = UpdateCloudflare()
-				if p := g.policy.Load(); p.Bots != nil {
-					_, _ = UpdateBotRanges(p.Bots)
-				}
 				_ = load()
+			case <-feeds.C:
+				go refreshFeeds()
 			}
 		}
 	}()
-	if p := g.policy.Load(); p.Bots != nil {
-		go func() { // first start: fetch the published crawler ranges once if they are missing
-			if _, err := os.Stat(botsDir()); os.IsNotExist(err) {
-				UpdateBotRanges(p.Bots)
-				_ = load()
-			}
-		}()
-	}
+	go refreshFeeds() // missing or stale feeds at start
 	if containsStr(cfg.TrustedProxies, "cloudflare") {
 		go func() {
 			if _, err := UpdateCloudflare(); err == nil {

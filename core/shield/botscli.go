@@ -24,7 +24,15 @@ const botsUsage = `makit shield bots — known bots, crawlers and AI agents, and
   bots unset KEY                back to the catalog default
   bots check --ua TEXT [--ip IP] [--header k=v]…
                                 how a client would be classified (verifies the IP now)
-  bots update                   download the crawlers' published IP ranges (the gate does this daily)
+  bots sources                  every IP feed (published by the operators, and yours) with its size and last download
+  bots source add URL --agent ID [--name TEXT --category CAT] [--every 6h] [--by-ip]
+                                download IP ranges for a bot from a URL, refreshed on a schedule. A new agent id
+                                (with --category) is recognised by IP alone: partners' crawlers, your monitoring
+  bots source remove URL
+  bots ip add AGENT IP|CIDR… [--name TEXT --category CAT]
+  bots ip remove AGENT IP|CIDR…
+  bots ips [AGENT]              IPs typed by hand
+  bots update [AGENT]           download the feeds now (the gate refreshes them when due)
   bots robots                   robots.txt lines for every bot your policy blocks
 `
 
@@ -35,7 +43,7 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		return err
 	}
 	load := func() (*BotCatalog, *Scoring, error) {
-		bc, err := LoadBots(dirs, cfg.Bots.File, cfg.Bots.Policy)
+		bc, err := LoadBotsConfig(dirs, cfg.Bots)
 		if err != nil || bc == nil {
 			if err == nil {
 				err = fmt.Errorf("no bots catalog (security/bots/agents.yaml) — makit rules update")
@@ -217,20 +225,64 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		if err != nil {
 			return err
 		}
-		n, errs := UpdateBotRanges(bc)
-		ids := make([]string, 0, len(n))
-		for id := range n {
-			ids = append(ids, id)
+		only, _ := splitFirst(rest)
+		if only != "" && bc.Agent(only) == nil {
+			return fmt.Errorf("no agent %q", only)
 		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			fmt.Printf("  %-18s %d ranges\n", id, n[id])
+		done, err := RefreshBotRanges(bc, true, only)
+		if err != nil {
+			return err
 		}
-		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, "  ✗", e)
+		failed := 0
+		for _, st := range done {
+			if st.Error != "" {
+				failed++
+				fmt.Fprintf(os.Stderr, "  ✗ %-18s %s: %s\n", st.Agent, st.URL, st.Error)
+				continue
+			}
+			fmt.Printf("  %-18s %8d  %s\n", st.Agent, st.Count, st.URL)
 		}
-		if len(n) == 0 && len(errs) > 0 {
-			return fmt.Errorf("no ranges downloaded")
+		if failed > 0 && failed == len(done) {
+			return fmt.Errorf("no feed downloaded")
+		}
+		return nil
+	case "sources":
+		bc, _, err := load()
+		if err != nil {
+			return err
+		}
+		status := readFeedStatus()
+		for _, a := range bc.Agents {
+			for _, f := range a.feeds {
+				st := status[f.File]
+				state := "not downloaded yet"
+				if !st.OK.IsZero() {
+					state = fmt.Sprintf("%d · %s ago", st.Count, time.Since(st.OK).Round(time.Minute))
+				}
+				if st.Error != "" {
+					state += " · last try failed: " + st.Error
+				}
+				who := "catalog"
+				if f.Custom {
+					who = "yours"
+				}
+				fmt.Printf("  %-18s %-7s every %-5s %s\n      %s\n", a.ID, who, fmtDur(f.Every), state, f.URL)
+			}
+			if len(a.manual) > 0 {
+				fmt.Printf("  %-18s %-7s typed       %d\n", a.ID, "yours", len(a.manual))
+			}
+		}
+		return nil
+	case "source":
+		return cmdBotSource(cfgPath, dirs, rest, load)
+	case "ip":
+		return cmdBotIP(cfgPath, dirs, rest, load)
+	case "ips":
+		only, _ := splitFirst(rest)
+		for _, src := range cfg.Bots.Sources {
+			if (only == "" || src.Agent == only) && len(src.IPs) > 0 {
+				fmt.Printf("  %-18s %s\n", src.Agent, strings.Join(src.IPs, " "))
+			}
 		}
 		return nil
 	case "robots":
@@ -402,4 +454,224 @@ func copyTree(src, dst string, force bool) error {
 	}
 	fmt.Printf("  copied %s\n", dst)
 	return out.Close()
+}
+
+// editSources rewrites bots.sources in the config and checks the result loads; on any error the file is restored.
+func editSources(cfgPath string, dirs []string, fn func([]BotSource) ([]BotSource, error)) (*BotCatalog, error) {
+	orig, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(orig, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 {
+		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	child := func(m *yaml.Node, key string, kind yaml.Kind) *yaml.Node {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				if v := m.Content[i+1]; v.Kind == kind {
+					return v
+				}
+				m.Content[i+1] = &yaml.Node{Kind: kind}
+				return m.Content[i+1]
+			}
+		}
+		v := &yaml.Node{Kind: kind}
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: key}, v)
+		return v
+	}
+	bots := child(doc.Content[0], "bots", yaml.MappingNode)
+	seq := child(bots, "sources", yaml.SequenceNode)
+	var cur []BotSource
+	if err := seq.Decode(&cur); err != nil {
+		return nil, err
+	}
+	next, err := fn(cur)
+	if err != nil {
+		return nil, err
+	}
+	var n yaml.Node
+	if err := n.Encode(next); err != nil {
+		return nil, err
+	}
+	*seq = n
+	if len(next) == 0 {
+		seq.Kind, seq.Tag, seq.Style = yaml.SequenceNode, "!!seq", yaml.FlowStyle
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return nil, err
+	}
+	st, err := os.Stat(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	write := func(b []byte) error {
+		if err := os.WriteFile(cfgPath+".tmp", b, st.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Rename(cfgPath+".tmp", cfgPath)
+	}
+	if err := write(out); err != nil {
+		return nil, err
+	}
+	cfg, err := LoadConfig(cfgPath)
+	var bc *BotCatalog
+	if err == nil {
+		bc, err = LoadBotsConfig(dirs, cfg.Bots)
+	}
+	if err != nil {
+		_ = write(orig)
+		return nil, err
+	}
+	return bc, nil
+}
+
+func cmdBotSource(cfgPath string, dirs []string, args []string, _ func() (*BotCatalog, *Scoring, error)) error {
+	sub, rest := splitFirst(args)
+	switch sub {
+	case "add":
+		url, more := splitFirst(rest)
+		fs := flag.NewFlagSet("source add", flag.ContinueOnError)
+		src := BotSource{URL: url}
+		fs.StringVar(&src.Agent, "agent", "", "agent id (from makit shield bots agents, or a new one)")
+		fs.StringVar(&src.Name, "name", "", "display name of a new agent")
+		fs.StringVar(&src.Category, "category", "", "category of a new agent")
+		fs.StringVar(&src.Every, "every", "", "refresh interval (default: bots.refresh, 24h)")
+		byIP := fs.Bool("by-ip", false, "recognise a catalog agent by IP even without its User-Agent")
+		if err := fs.Parse(more); err != nil {
+			return err
+		}
+		if url == "" || src.Agent == "" {
+			return fmt.Errorf("usage: bots source add URL --agent ID [--name TEXT --category CAT] [--every 6h] [--by-ip]")
+		}
+		if *byIP {
+			src.ByIP = byIP
+		}
+		bc, err := editSources(cfgPath, dirs, func(cur []BotSource) ([]BotSource, error) {
+			for _, s := range cur {
+				if s.URL == url {
+					return nil, fmt.Errorf("%s is already a source (of %s)", url, s.Agent)
+				}
+			}
+			return append(cur, src), nil
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("source added for %s; downloading…\n", src.Agent)
+		done, err := RefreshBotRanges(bc, true, src.Agent)
+		if err != nil {
+			return err
+		}
+		for _, st := range done {
+			if st.URL != url {
+				continue
+			}
+			if st.Error != "" {
+				return fmt.Errorf("saved, but the first download failed: %s (the gate retries every hour)", st.Error)
+			}
+			fmt.Printf("  %d IPs/ranges", st.Count)
+			if st.Skipped > 0 {
+				fmt.Printf(" (%d refused: wider than /8 or /32)", st.Skipped)
+			}
+			fmt.Println(" — the running gate picks them up within 2 s")
+		}
+		return nil
+	case "remove":
+		url, _ := splitFirst(rest)
+		var agent string
+		_, err := editSources(cfgPath, dirs, func(cur []BotSource) ([]BotSource, error) {
+			for i, s := range cur {
+				if s.URL == url {
+					agent = s.Agent
+					if len(s.IPs) > 0 { // keep the typed IPs of that entry
+						cur[i].URL, cur[i].Every = "", ""
+						return cur, nil
+					}
+					return append(cur[:i], cur[i+1:]...), nil
+				}
+			}
+			return nil, fmt.Errorf("no source with url %s (makit shield bots sources)", url)
+		})
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(filepath.Join(botsDir(), feedFile(agent, url)))
+		fmt.Printf("source removed from %s\n", agent)
+		return nil
+	}
+	return fmt.Errorf("usage: bots source add|remove URL …")
+}
+
+func cmdBotIP(cfgPath string, dirs []string, args []string, _ func() (*BotCatalog, *Scoring, error)) error {
+	sub, rest := splitFirst(args)
+	agent, more := splitFirst(rest)
+	fs := flag.NewFlagSet("ip", flag.ContinueOnError)
+	name := fs.String("name", "", "display name of a new agent")
+	cat := fs.String("category", "", "category of a new agent")
+	var ips []string
+	for len(more) > 0 { // IPs and flags in any order
+		if strings.HasPrefix(more[0], "-") {
+			if err := fs.Parse(more); err != nil {
+				return err
+			}
+			more = fs.Args()
+			continue
+		}
+		ips, more = append(ips, more[0]), more[1:]
+	}
+	if (sub != "add" && sub != "remove") || agent == "" || len(ips) == 0 {
+		return fmt.Errorf("usage: bots ip add|remove AGENT IP|CIDR… [--name TEXT --category CAT]")
+	}
+	norm := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		p, err := ParsePrefix(ip)
+		if err != nil {
+			return err
+		}
+		norm = append(norm, p.String())
+	}
+	_, err := editSources(cfgPath, dirs, func(cur []BotSource) ([]BotSource, error) {
+		at := -1
+		for i, s := range cur {
+			if s.Agent == agent && s.URL == "" {
+				at = i
+			}
+		}
+		if sub == "add" {
+			if at < 0 {
+				cur = append(cur, BotSource{Agent: agent, Name: *name, Category: *cat})
+				at = len(cur) - 1
+			}
+			for _, ip := range norm {
+				if !containsStr(cur[at].IPs, ip) {
+					cur[at].IPs = append(cur[at].IPs, ip)
+				}
+			}
+			return cur, nil
+		}
+		if at < 0 {
+			return nil, fmt.Errorf("%s has no typed IPs", agent)
+		}
+		var keep []string
+		for _, x := range cur[at].IPs {
+			if !containsStr(norm, x) {
+				keep = append(keep, x)
+			}
+		}
+		cur[at].IPs = keep
+		if len(keep) == 0 && cur[at].Category == "" && cur[at].Name == "" {
+			cur = append(cur[:at], cur[at+1:]...)
+		}
+		return cur, nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s: %s %s — the running gate picks it up within 2 s\n", agent, map[string]string{"add": "added", "remove": "removed"}[sub], strings.Join(norm, " "))
+	return nil
 }

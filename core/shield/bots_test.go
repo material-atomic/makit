@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -112,7 +114,7 @@ func TestVerifyRDNSAndRanges(t *testing.T) {
 		t.Errorf("gptbot before ranges: %s", got)
 	}
 	os.MkdirAll(botsDir(), 0o755)
-	os.WriteFile(filepath.Join(botsDir(), "gptbot.txt"), []byte("# test\n132.196.86.0/24\n"), 0o644)
+	os.WriteFile(filepath.Join(botsDir(), feedFile("gptbot", "https://openai.com/gptbot.json")), []byte("# test\n132.196.86.0/24\n"), 0o644)
 	v.LoadRanges(bc)
 	if got := v.Check(byID["gptbot"], netip.MustParseAddr("132.196.86.5"), now); got != "verified" {
 		t.Errorf("gptbot inside ranges: %s", got)
@@ -229,12 +231,88 @@ func TestRobotsAndRanges(t *testing.T) {
 	if strings.Contains(r, "Googlebot") || strings.Contains(r, "AhrefsBot") {
 		t.Errorf("robots.txt disallows an allowed bot:\n%s", r)
 	}
-	got := parseRanges([]byte(`{"creationTime":"x","prefixes":[{"ipv4Prefix":"157.55.39.0/24"},{"ipv6Prefix":"2001:4860:4801:10::/64"}]}`))
-	if strings.Join(got, " ") != "157.55.39.0/24 2001:4860:4801:10::/64" {
+	got, _ := parseRanges([]byte(`{"creationTime":"x","prefixes":[{"ipv4Prefix":"157.55.39.0/24"},{"ipv6Prefix":"2001:4860:4801:10::/64"}]}`))
+	if len(got) != 2 || got[0].String() != "157.55.39.0/24" || got[1].String() != "2001:4860:4801:10::/64" {
 		t.Errorf("json ranges: %v", got)
 	}
-	if got := parseRanges([]byte("# list\n1.2.3.0/24\nnot-an-ip\n")); len(got) != 1 {
-		t.Errorf("text ranges: %v", got)
+	got, skipped := parseRanges([]byte("# list\n1.2.3.0/24 ; office\nnot-an-ip\n5.6.7.8,crawler-1\n0.0.0.0/0\n2001::/16\n1.2.3.0/24\n"))
+	if len(got) != 2 || skipped != 2 {
+		t.Errorf("text ranges: %v skipped %d", got, skipped)
+	}
+	if got, _ := parseRanges([]byte(`{"ips":["9.9.9.9","9.9.9.10"]}`)); len(got) != 2 {
+		t.Errorf("json IP list: %v", got)
+	}
+}
+
+func TestBotSourcesAndTypedIPs(t *testing.T) {
+	StateDir = t.TempDir()
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Write([]byte("# partner crawler\n192.0.2.0/24\n198.51.100.77\n"))
+	}))
+	defer srv.Close()
+	cfg := filepath.Join(t.TempDir(), "shield.yaml")
+	os.WriteFile(cfg, []byte("mode: block\n"), 0o640)
+	dirs := []string{repoCatalog}
+	if err := cmdBotSource(cfg, dirs, []string{"add", srv.URL + "/ips.txt", "--agent", "partner", "--category", "monitoring", "--every", "6h"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdBotSource(cfg, dirs, []string{"add", srv.URL + "/x", "--agent", "nobody"}, nil); err == nil {
+		t.Error("new agent without a category accepted")
+	}
+	if err := cmdBotIP(cfg, dirs, []string{"add", "gptbot", "203.0.113.4", "203.0.113.0/28"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdBotIP(cfg, dirs, []string{"add", "office-monitor", "10.1.2.3", "--category", "monitoring", "--name", "Office monitor"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdBotIP(cfg, dirs, []string{"add", "gptbot", "0.0.0.0/1"}, nil); err == nil {
+		t.Error("a /1 accepted as a bot range")
+	}
+	c, err := LoadConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc, err := LoadBotsConfig(dirs, c.Bots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := NewVerifier()
+	v.LoadRanges(bc)
+	now := time.Now()
+	if v.RangeCount("partner") != 2 || v.ByIP(netip.MustParseAddr("192.0.2.9"), now) != "partner" {
+		t.Errorf("partner feed: %d ranges, byIP %q", v.RangeCount("partner"), v.ByIP(netip.MustParseAddr("192.0.2.9"), now))
+	}
+	if v.ByIP(netip.MustParseAddr("203.0.113.4"), now) != "" {
+		t.Error("a catalog agent is recognised by IP without --by-ip")
+	}
+	if got := v.Check(bc.Agent("gptbot"), netip.MustParseAddr("203.0.113.4"), now); got != "verified" {
+		t.Errorf("typed gptbot IP: %s", got)
+	}
+	// The policy sees an IP-only agent even with a browser User-Agent.
+	p := &Policy{Allow: NewSet(), Block: NewSet(), Bots: bc, Verifier: v, Limiter: NewLimiter()}
+	d := p.Decide(Request{Peer: "10.1.2.3", UA: chromeUA, Method: "GET", URI: "/"})
+	if d.Verdict != "bot-verified" || d.Bot == nil || d.Bot.ID != "office-monitor" {
+		t.Errorf("typed monitor IP: %+v %+v", d, d.Bot)
+	}
+	// Refresh only when due.
+	if done, _ := RefreshBotRanges(bc, false, "partner"); len(done) != 0 || hits != 1 {
+		t.Errorf("fresh feed downloaded again: %d (hits %d)", len(done), hits)
+	}
+	// Remove: the source and its cached file go; typed IPs stay until removed.
+	if err := cmdBotSource(cfg, dirs, []string{"remove", srv.URL + "/ips.txt"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(botsDir(), feedFile("partner", srv.URL+"/ips.txt"))); !os.IsNotExist(err) {
+		t.Error("cache file of a removed source kept")
+	}
+	if err := cmdBotIP(cfg, dirs, []string{"remove", "gptbot", "203.0.113.4", "203.0.113.0/28"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = LoadConfig(cfg)
+	if len(c.Bots.Sources) != 1 || c.Bots.Sources[0].Agent != "office-monitor" {
+		t.Errorf("sources left: %+v", c.Bots.Sources)
 	}
 }
 

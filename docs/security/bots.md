@@ -89,6 +89,42 @@ Polite crawlers obey `robots.txt`, so publish what `makit shield bots robots` pr
 makit still blocks the ones that ignore it. `Google-Extended` and `Applebot-Extended` only exist in robots.txt: they
 opt your pages out of Gemini and Apple Intelligence training without affecting search.
 
+## Your own IP sources
+
+The operators' published ranges are downloaded for you. Add your own, from a URL refreshed on a schedule or typed by
+hand — for a catalog agent (more ranges to verify it), or for a new agent of yours that is then recognised by IP alone,
+whatever its User-Agent (a partner's crawler, your uptime monitor, your office):
+
+```bash
+makit shield bots source add https://partner.example/crawler-ips.txt --agent partner --category monitoring --every 6h
+makit shield bots source add https://example.org/gptbot-extra.json --agent gptbot
+makit shield bots ip add office-monitor 203.0.113.10 --category monitoring --name "Office monitor"
+makit shield bots ip add gptbot 198.51.100.0/24
+makit shield bots sources            # every feed: size, last download, errors
+makit shield bots ips
+makit shield bots update [AGENT]     # download now
+makit shield bots source remove URL
+makit shield bots ip remove gptbot 198.51.100.0/24
+```
+
+A feed can be JSON (the `{"prefixes":[{"ipv4Prefix":…}]}` shape the big operators use, or any JSON holding IPs and
+CIDRs) or text with IPs/CIDRs (comments after `#` or `;`, CSV columns are fine). Each one is cached in
+`/var/lib/makit/shield/bots/` and downloaded again when its interval (`--every`, default `bots.refresh: 24h`) is up;
+a failed download keeps the previous copy and is retried after an hour. Ranges wider than /8 (IPv4) or /32 (IPv6)
+are refused: a broken feed must not turn half the internet into a "verified" bot.
+
+All ranges go into the same kind of set as the block list (a hash table per prefix length), so a lookup costs the
+same with a hundred ranges or a few million. In `shield.yaml` this is:
+
+```yaml
+bots:
+  refresh: 24h
+  sources:
+    - { agent: partner, category: monitoring, url: https://partner.example/crawler-ips.txt, every: 6h }
+    - { agent: office-monitor, name: Office monitor, category: monitoring, ips: [203.0.113.10] }
+    - { agent: gptbot, ips: [198.51.100.0/24], by_ip: true }   # by_ip: also recognise it without its User-Agent
+```
+
 ## Your own lists
 
 ```bash

@@ -147,9 +147,14 @@ func (p *Policy) Decide(r Request) Decision {
 		}
 	}
 	if p.Bots != nil {
-		if a := p.Bots.Identify(r); a != nil {
-			st := "claimed"
-			if a.Verifiable() {
+		a, st := p.Bots.Identify(r), "claimed"
+		if a == nil && p.Verifier != nil { // no bot User-Agent: maybe an IP from your own bot sources
+			if id := p.Verifier.ByIP(client, now); id != "" {
+				a, st = p.Bots.Agent(id), "verified"
+			}
+		}
+		if a != nil {
+			if st != "verified" && a.Verifiable() {
 				st = "unknown"
 				if p.Verifier != nil {
 					st = p.Verifier.Check(a, client, now)
