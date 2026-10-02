@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="makit — Security for the Linux servers you run yourself."><title>makit — Security for the Linux servers you run yourself.</title><defs>
+<radialGradient id="glow" cx="0.18" cy="0.42" r="0.6">
+<stop offset="0" stop-color="#1f6feb" stop-opacity="0.32"/>
+<stop offset="1" stop-color="#1f6feb" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="1" stop-color="#fff" stop-opacity="0.15"/>
+</linearGradient>
+<mask id="gm"><rect width="1200" height="630" fill="url(#fade)"/></mask>
+</defs>
+<rect width="1200" height="630" fill="#0d1117"/>
+<g stroke="#58a6ff" stroke-opacity="0.06" stroke-width="1" mask="url(#gm)"><path d="M0 0 V630" /><path d="M40 0 V630" /><path d="M80 0 V630" /><path d="M120 0 V630" /><path d="M160 0 V630" /><path d="M200 0 V630" /><path d="M240 0 V630" /><path d="M280 0 V630" /><path d="M320 0 V630" /><path d="M360 0 V630" /><path d="M400 0 V630" /><path d="M440 0 V630" /><path d="M480 0 V630" /><path d="M520 0 V630" /><path d="M560 0 V630" /><path d="M600 0 V630" /><path d="M640 0 V630" /><path d="M680 0 V630" /><path d="M720 0 V630" /><path d="M760 0 V630" /><path d="M800 0 V630" /><path d="M840 0 V630" /><path d="M880 0 V630" /><path d="M920 0 V630" /><path d="M960 0 V630" /><path d="M1000 0 V630" /><path d="M1040 0 V630" /><path d="M1080 0 V630" /><path d="M1120 0 V630" /><path d="M1160 0 V630" /><path d="M1200 0 V630" /><path d="M0 0 H1200" /><path d="M0 40 H1200" /><path d="M0 80 H1200" /><path d="M0 120 H1200" /><path d="M0 160 H1200" /><path d="M0 200 H1200" /><path d="M0 240 H1200" /><path d="M0 280 H1200" /><path d="M0 320 H1200" /><path d="M0 360 H1200" /><path d="M0 400 H1200" /><path d="M0 440 H1200" /><path d="M0 480 H1200" /><path d="M0 520 H1200" /><path d="M0 560 H1200" /><path d="M0 600 H1200" /></g>
+<rect width="1200" height="630" fill="url(#glow)"/>
+<rect x="0" y="0" width="1200" height="6" fill="#1f6feb"/>
+<g transform="translate(96 108) scale(2.6)"><path d="M32 3.5 L55.5 11.5 C56.6 11.9 57 12.6 57 13.7 V29 C57 44.5 46.5 55 32.9 60.2 C32.3 60.4 31.7 60.4 31.1 60.2 C17.5 55 7 44.5 7 29 V13.7 C7 12.6 7.4 11.9 8.5 11.5 Z" fill="#1f6feb"/><g fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 22.5 L29 31.5 L19.5 40.5"/><path d="M33.5 41 H45"/></g></g>
+<g transform="translate(296 133) scale(2.55)"><g fill="none" stroke="#f0f6fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 41.5 V18.5 M2.5 26 C2.5 21.5 5 18.5 9 18.5 C13 18.5 15 21.5 15 26 V41.5 M15 26 C15 21.5 17 18.5 21 18.5 C25 18.5 27.5 21.5 27.5 26 V41.5"/><path transform="translate(1.5 0)" d="M60 18.5 V41.5 M60 30 A11.5 11.5 0 1 1 37 30 A11.5 11.5 0 1 1 60 30"/><path transform="translate(1.5 0)" d="M71 6.5 V41.5 M86.5 18.5 L71.5 31.5 M77.5 26.5 L87.5 41.5"/><path transform="translate(1.5 0)" d="M98.5 18.5 V41.5"/><path transform="translate(2.5 0)" d="M111 8.5 V34.5 C111 39 113.5 41.5 118 41.5 H121 M105 18.5 H121"/></g><rect x="97" y="5.5" width="6" height="6" rx="1" fill="#58a6ff"/></g>
+<text x="96" y="352" font-family="Inter, 'Inter Variable', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="50" font-weight="600" fill="#f0f6fc" letter-spacing="-0.5">Security for the Linux servers</text>
+<text x="96" y="414" font-family="Inter, 'Inter Variable', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="50" font-weight="600" fill="#f0f6fc" letter-spacing="-0.5">you run yourself.</text>
+<g transform="translate(96 470)">
+<rect width="1008" height="72" rx="12" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+<text x="30" y="46" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="26" fill="#c9d1d9" xml:space="preserve"><tspan fill="#7ee787">$</tspan> curl -fsSL <tspan fill="#58a6ff">https://makit.sh/install.sh</tspan> | sh</text>
+</g>
+<text x="1104" y="118" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="30" font-weight="500" fill="#58a6ff">makit.sh</text>
+</svg>
