@@ -55,7 +55,7 @@ check_component() {
     dockerfw)
       if ! have docker; then echo "ok|no Docker"
       elif grep -qs '^# BEGIN makit docker' /etc/ufw/after.rules; then
-        local eg; eg=$(sed -n 's/^# makit egress: //p' /etc/ufw/after.rules | head -1)
+        local eg; eg=$(sed -n 's/^# makit egress: //p' /etc/ufw/after.rules | head -1 || true)
         echo "ok|on${eg:+, egress: $eg}"
       else echo "missing|published ports bypass ufw"; fi ;;
     schedule)

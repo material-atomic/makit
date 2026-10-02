@@ -55,14 +55,14 @@ firewall_docker() {
   step "Docker traffic through ufw"
   if [[ ! -f $UFW_AFTER && $MAKIT_DRY -eq 0 ]]; then die "$UFW_AFTER not found (is ufw installed?)"; fi
   # Keep the egress policy already in place unless asked to change it.
-  if [[ -z $egress ]]; then egress=$(sed -n 's/^# makit egress: //p' "$UFW_AFTER" 2>/dev/null | head -1); fi
+  if [[ -z $egress ]]; then egress=$(sed -n 's/^# makit egress: //p' "$UFW_AFTER" 2>/dev/null | head -1 || true); fi
   [[ $egress == off ]] && egress=''
   local eg=()
   # shellcheck disable=SC2206 # word-splitting the port list is intended
   [[ -n $egress ]] && eg=($egress)
   for p in "${eg[@]}"; do valid_port "$p"; done
 
-  block="# BEGIN makit docker — managed by makit firewall --docker (docs/security/docker-ports.md, egress.md)"
+  block="# BEGIN makit docker - managed by makit firewall --docker (docs/security/docker-ports.md, egress.md)"
   [[ -n $egress ]] && block+=$'\n'"# makit egress: $egress"
   block+=$'\n'"*filter"$'\n'":DOCKER-USER - [0:0]"$'\n'":ufw-user-forward - [0:0]"
   if [[ ${#eg[@]} -gt 0 ]]; then
