@@ -28,6 +28,14 @@ type Gate struct {
 	header string
 	notify func(text string) // set when notifications are configured
 
+	// Automatic bans take effect in memory at once; a writer persists them in batches (see banWriter).
+	banMu     sync.Mutex
+	pending   []Entry // not written yet
+	inflight  []Entry // being written
+	banDrops  int64
+	kernel    atomic.Bool  // mirror bans into nftables
+	selfWrite atomic.Int64 // mtime (ns) of state.json after our own write: not a reason to reload
+
 	mu    sync.Mutex
 	stats map[string]int64 // verdict → count since start
 }

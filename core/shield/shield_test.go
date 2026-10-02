@@ -376,3 +376,38 @@ func BenchmarkMatchMillion(b *testing.B) {
 		s.Match(netip.AddrFrom4([4]byte{byte(11 + i>>24), byte(i >> 16), byte(i >> 8), byte(i)}), now)
 	}
 }
+
+// A flood of automatic bans must not touch the disk per request: bans are active at once and saved in batches.
+func TestAutoBanBatched(t *testing.T) {
+	StateDir = t.TempDir()
+	g := &Gate{stats: map[string]int64{}}
+	p := &Policy{Allow: NewSet(), Block: NewSet()}
+	g.policy.Store(p)
+	start := time.Now()
+	for i := 0; i < 20000; i++ {
+		g.autoBan(netip.AddrFrom4([4]byte{100, 64, byte(i >> 8), byte(i)}), time.Hour, "score:critical", "test")
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Errorf("20000 bans took %s in the request path", el)
+	}
+	if _, ok := p.Block.Match(netip.MustParseAddr("100.64.1.1"), time.Now()); !ok {
+		t.Error("ban not active before it is saved")
+	}
+	if st, _ := LoadState(); len(st.Block) != 0 {
+		t.Error("state written in the request path")
+	}
+	if n := len(g.unsaved()); n != 20000 {
+		t.Errorf("unsaved %d", n)
+	}
+	g.flushBans()
+	st, _ := LoadState()
+	if len(st.Block) != 20000 || len(g.unsaved()) != 0 || g.selfWrite.Load() == 0 {
+		t.Errorf("after flush: state %d, unsaved %d, selfWrite %d", len(st.Block), len(g.unsaved()), g.selfWrite.Load())
+	}
+	// Banning again updates in place.
+	g.autoBan(netip.MustParseAddr("100.64.1.1"), 48*time.Hour, "rule:x", "again")
+	g.flushBans()
+	if st, _ := LoadState(); len(st.Block) != 20000 {
+		t.Errorf("re-ban duplicated: %d", len(st.Block))
+	}
+}

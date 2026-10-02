@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/material-atomic/makit/core/notify"
 	"log"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -135,6 +137,19 @@ func Serve(cfgPath string, dirs []string) error {
 		return err
 	}
 	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
+	// Ban batches go to every channel of `makit notify` whose min_level allows "high" (read at each send, so channels
+	// added later work without a restart).
+	g.notify = func(text string) {
+		go func() {
+			c, err := notify.Load(notifyConfig())
+			if err != nil || len(c.Channels) == 0 {
+				return
+			}
+			for _, err := range c.Send(notify.Message{Title: "makit shield", Text: text, Level: "high", Source: "shield"}, "") {
+				log.Printf("shield: notify: %v", err)
+			}
+		}()
+	}
 	// Edge listeners start/stop with the "edge" switch and restart when their configuration changes.
 	var edgeMu sync.Mutex
 	var edgeStop context.CancelFunc
@@ -195,7 +210,11 @@ func Serve(cfgPath string, dirs []string) error {
 		if err != nil {
 			return err
 		}
-		p.Ban = func(a netip.Addr, d time.Duration, src, why string) { g.autoBan(a, d, src, why, c.KernelBlock) }
+		p.Ban = g.autoBan
+		for _, e := range g.unsaved() { // bans still on their way to state.json
+			p.Block.Add(e)
+		}
+		g.kernel.Store(c.KernelBlock && c.Mode == "block")
 		if p.Scoring != nil {
 			if tracker == nil || tracker.sc.Window != p.Scoring.Window {
 				tracker = NewTracker(p.Scoring, 200000)
@@ -244,6 +263,7 @@ func Serve(cfgPath string, dirs []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go g.banWriter(ctx)
 
 	mux := http.NewServeMux()
 	mux.Handle("/check", g.checkHandler())
@@ -308,7 +328,8 @@ func Serve(cfgPath string, dirs []string) error {
 			case <-tick.C:
 				changed := false
 				if st, err := os.Stat(statePath()); err == nil && st.ModTime().After(last) {
-					last, changed = st.ModTime(), true
+					last = st.ModTime()
+					changed = changed || st.ModTime().UnixNano() != g.selfWrite.Load() // our own ban batch: no reload
 				}
 				if st, err := os.Stat(cfgPath); err == nil && st.ModTime().After(lastCfg) {
 					lastCfg, changed = st.ModTime(), true
@@ -352,24 +373,118 @@ func Serve(cfgPath string, dirs []string) error {
 	return asrv.Shutdown(sh)
 }
 
-func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason string, kernel bool) {
+func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason string) {
 	if d <= 0 {
 		return
 	}
-	p := netip.PrefixFrom(a, a.BitLen())
-	until := time.Now().Add(d)
-	e := Entry{Prefix: p, Until: until, Reason: reason, Source: source, Added: time.Now()}
-	if _, err := withState(func(st *State) error { st.Block = upsert(st.Block, e); return nil }); err != nil {
-		log.Printf("shield: ban %s: %v", a, err)
+	now := time.Now()
+	e := Entry{Prefix: netip.PrefixFrom(a, a.BitLen()), Until: now.Add(d), Reason: reason, Source: source, Added: now}
+	g.policy.Load().Block.Add(e) // effective for the next request already
+	g.banMu.Lock()
+	if len(g.pending) < 200000 {
+		g.pending = append(g.pending, e)
+	} else {
+		g.banDrops++ // still banned in memory; only persistence is skipped under an extreme flood
+	}
+	g.banMu.Unlock()
+}
+
+// unsaved returns the bans not yet in state.json, so a reload in between keeps them.
+func (g *Gate) unsaved() []Entry {
+	g.banMu.Lock()
+	defer g.banMu.Unlock()
+	return append(append([]Entry(nil), g.inflight...), g.pending...)
+}
+
+// banWriter persists automatic bans once a second: one state.json write, one nft batch, one log line and one
+// notification per batch — a botnet of 100,000 IPs costs a few writes, not 100,000 rewrites of a growing file.
+func (g *Gate) banWriter(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			g.flushBans()
+			return
+		case <-t.C:
+			g.flushBans()
+		}
+	}
+}
+
+func (g *Gate) flushBans() {
+	g.banMu.Lock()
+	batch, drops := g.pending, g.banDrops
+	g.pending, g.inflight, g.banDrops = nil, batch, 0
+	g.banMu.Unlock()
+	if len(batch) == 0 && drops == 0 {
 		return
 	}
-	g.policy.Load().Block.Add(e)
-	if kernel {
-		_ = kernelAdd(p, until)
+	defer func() {
+		g.banMu.Lock()
+		g.inflight = nil
+		g.banMu.Unlock()
+	}()
+	_, err := withState(func(st *State) error {
+		at := make(map[netip.Prefix]int, len(st.Block))
+		for i, e := range st.Block {
+			at[e.Prefix] = i
+		}
+		for _, e := range batch {
+			if i, ok := at[e.Prefix]; ok {
+				st.Block[i] = e
+			} else {
+				at[e.Prefix] = len(st.Block)
+				st.Block = append(st.Block, e)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("shield: saving %d bans: %v (they stay active until restart)", len(batch), err)
+		return
 	}
-	log.Printf("shield: banned %s for %s (%s: %s)", a, d, source, reason)
+	if info, err := os.Stat(statePath()); err == nil {
+		g.selfWrite.Store(info.ModTime().UnixNano())
+	}
+	if g.kernel.Load() {
+		var b strings.Builder
+		now := time.Now()
+		for _, e := range batch {
+			if KernelSafe(e.Prefix) {
+				set := "block4"
+				if e.Prefix.Addr().Is6() {
+					set = "block6"
+				}
+				fmt.Fprintf(&b, "add element inet %s %s { %s }\n", nftTable, set, element(e.Prefix, e.Until, now))
+			}
+		}
+		if b.Len() > 0 {
+			if err := nft(b.String()); err != nil {
+				log.Printf("shield: kernel bans: %v", err)
+			}
+		}
+	}
+	by := map[string]int{}
+	for _, e := range batch {
+		by[e.Source]++
+	}
+	var parts []string
+	for src, n := range by {
+		parts = append(parts, fmt.Sprintf("%s %d", src, n))
+	}
+	sort.Strings(parts)
+	msg := fmt.Sprintf("banned %d IPs (%s)", len(batch), strings.Join(parts, ", "))
+	if len(batch) == 1 {
+		e := batch[0]
+		msg = fmt.Sprintf("banned %s until %s — %s (%s)", e.Prefix.Addr(), e.Until.UTC().Format("01-02 15:04 UTC"), e.Reason, e.Source)
+	}
+	if drops > 0 {
+		msg += fmt.Sprintf("; %d more banned in memory only (queue full)", drops)
+	}
+	log.Printf("shield: %s", msg)
 	if g.notify != nil {
-		g.notify(fmt.Sprintf("banned %s for %s — %s (%s)", a, d, reason, source))
+		g.notify(msg)
 	}
 }
 
@@ -402,4 +517,11 @@ func catalogFingerprint(dirs []string, files ...string) string {
 		}
 	}
 	return b.String()
+}
+
+func notifyConfig() string {
+	if p := os.Getenv("MAKIT_NOTIFY_CONFIG"); p != "" {
+		return p
+	}
+	return notify.DefaultConfig
 }
