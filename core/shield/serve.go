@@ -3,6 +3,7 @@ package shield
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -17,8 +20,8 @@ import (
 // Version is shown in /status.
 var Version = "dev"
 
-// buildPolicy loads config, state and rules into a policy.
-func buildPolicy(cfg *Config, dirs []string) (*Policy, *State, error) {
+// buildPolicy loads config, state, rules and (when lists is nil) the bulk lists into a policy.
+func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error) {
 	trusted, err := cfg.Trusted()
 	if err != nil {
 		return nil, nil, err
@@ -28,7 +31,12 @@ func buildPolicy(cfg *Config, dirs []string) (*Policy, *State, error) {
 		return nil, nil, err
 	}
 	allow, block := st.Sets(cfg.Allow)
-	p := &Policy{Observe: cfg.Mode == "observe", Pass: cfg.Mode == "pass", Trusted: trusted, Allow: allow, Block: block}
+	if lists == nil {
+		if lists, _, err = LoadLists(); err != nil {
+			return nil, nil, err
+		}
+	}
+	p := &Policy{Observe: cfg.Mode == "observe", Pass: cfg.Mode == "pass", Trusted: trusted, Allow: allow, Block: block, Lists: lists}
 	if cfg.Rules {
 		if p.Rules, err = LoadHTTPRules(dirs); err != nil {
 			return nil, nil, err
@@ -62,6 +70,11 @@ func (g *Gate) checkHandler() http.Handler {
 		q := Request{Peer: peer, Client: firstNonEmpty(h.Get("X-Makit-Client"), h.Get(g.header)), Method: method, Host: host,
 			URI: uri, UA: h.Get("User-Agent"), Referer: h.Get("Referer"), Country: h.Get("CF-IPCountry"), Ray: h.Get("CF-Ray"),
 			Headers: hdr, Received: time.Now()}
+		if !g.ask.Load() {
+			g.count("ask-off")
+			w.WriteHeader(http.StatusOK) // ask switched off: proxies keep working, nothing is checked
+			return
+		}
 		d := g.policy.Load().Decide(q)
 		g.count(d.Verdict)
 		snap := Snapshot{Time: q.Received, Listener: "check", Decision: d, Method: method, Host: host, URI: uri, UA: q.UA,
@@ -100,12 +113,57 @@ func Serve(cfgPath string, dirs []string) error {
 		return err
 	}
 	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
+	// Edge listeners start/stop with the "edge" switch and restart when their configuration changes.
+	var edgeMu sync.Mutex
+	var edgeStop context.CancelFunc
+	var edgeKey string
+	var edgeErr atomic.Value
+	edgeErr.Store("")
+	applyEdge := func(c *Config) {
+		b, _ := json.Marshal(c.Listeners)
+		key := fmt.Sprint(c.Edge, string(b))
+		edgeMu.Lock()
+		defer edgeMu.Unlock()
+		if key == edgeKey {
+			return
+		}
+		if edgeStop != nil {
+			edgeStop()
+			edgeStop = nil
+			time.Sleep(300 * time.Millisecond) // let the old listeners release their ports
+		}
+		edgeKey = key
+		edgeErr.Store("")
+		if !c.Edge || len(c.Listeners) == 0 {
+			return
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		edgeStop = cancel
+		go func(ls []Listener) {
+			if err := g.Serve(ctx, ls); err != nil {
+				edgeErr.Store(err.Error())
+				log.Printf("shield: edge: %v", err)
+			}
+		}(c.Listeners)
+	}
+	// Bulk lists are re-read only when their files change; bans and config reloads reuse them.
+	var lists *Set
+	var listsFP string
+	kernelWasOn := false
 	load := func() error {
 		c, err := LoadConfig(cfgPath)
 		if err != nil {
 			return err
 		}
-		p, st, err := buildPolicy(c, dirs)
+		listsChanged := false
+		if fp := listsFingerprint(); lists == nil || fp != listsFP {
+			l, fp2, err := LoadLists()
+			if err != nil {
+				return err
+			}
+			lists, listsFP, listsChanged = l, fp2, true
+		}
+		p, st, err := buildPolicy(c, dirs, lists)
 		if err != nil {
 			return err
 		}
@@ -113,14 +171,23 @@ func Serve(cfgPath string, dirs []string) error {
 		cfg = c
 		g.header = c.ClientHeader
 		g.policy.Store(p)
+		g.ask.Store(c.Ask && c.Mode != "pass")
+		applyEdge(c)
 		if c.KernelBlock && c.Mode == "block" {
 			if err := ApplyKernel(st.Block); err != nil {
 				log.Printf("shield: kernel set: %v", err)
 			}
-		} else {
+			if listsChanged || !kernelWasOn {
+				if err := ApplyKernelLists(lists); err != nil {
+					log.Printf("shield: kernel lists: %v", err)
+				}
+			}
+			kernelWasOn = true
+		} else if kernelWasOn || !c.KernelBlock {
 			_ = RemoveKernel()
+			kernelWasOn = false
 		}
-		log.Printf("shield: mode=%s block=%d allow=%d rules=%d trusted=%d listeners=%d", c.Mode, len(st.Block), len(st.Allow)+len(c.Allow), len(p.Rules), len(p.Trusted), len(c.Listeners))
+		log.Printf("shield: mode=%s ask=%v edge=%v block=%d lists=%d allow=%d rules=%d trusted=%d listeners=%d", c.Mode, c.Ask, c.Edge, len(st.Block), lists.Len(), len(st.Allow)+len(c.Allow), len(p.Rules), len(p.Trusted), len(c.Listeners))
 		return nil
 	}
 	if err := load(); err != nil {
@@ -134,8 +201,9 @@ func Serve(cfgPath string, dirs []string) error {
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		p := g.policy.Load()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": Version, "mode": cfg.Mode, "stats": g.Stats(),
-			"block": len(p.Block.Live(time.Now())), "allow": len(p.Allow.Live(time.Now())), "rules": len(p.Rules),
+		_ = json.NewEncoder(w).Encode(map[string]any{"version": Version, "mode": cfg.Mode, "ask": cfg.Ask, "edge": cfg.Edge,
+			"edge_error": edgeErr.Load(), "stats": g.Stats(),
+			"block": p.Block.Len(), "lists": p.Lists.Len(), "allow": p.Allow.Len(), "rules": len(p.Rules),
 			"trusted": len(p.Trusted), "listeners": len(cfg.Listeners), "kernel_block": cfg.KernelBlock})
 	})
 	admin, err := net.Listen("tcp", cfg.Admin)
@@ -149,9 +217,12 @@ func Serve(cfgPath string, dirs []string) error {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
-		var last time.Time
+		var last, lastCfg time.Time
 		if st, err := os.Stat(statePath()); err == nil {
 			last = st.ModTime()
+		}
+		if st, err := os.Stat(cfgPath); err == nil {
+			lastCfg = st.ModTime()
 		}
 		tick, daily := time.NewTicker(2*time.Second), time.NewTicker(24*time.Hour)
 		for {
@@ -163,9 +234,20 @@ func Serve(cfgPath string, dirs []string) error {
 					log.Printf("shield: reload: %v (kept the previous policy)", err)
 				}
 			case <-tick.C:
+				changed := false
 				if st, err := os.Stat(statePath()); err == nil && st.ModTime().After(last) {
-					last = st.ModTime()
-					_ = load()
+					last, changed = st.ModTime(), true
+				}
+				if st, err := os.Stat(cfgPath); err == nil && st.ModTime().After(lastCfg) {
+					lastCfg, changed = st.ModTime(), true
+				}
+				if listsFingerprint() != listsFP {
+					changed = true
+				}
+				if changed {
+					if err := load(); err != nil {
+						log.Printf("shield: reload: %v (kept the previous policy)", err)
+					}
 				}
 			case <-daily.C:
 				if _, err := UpdateCloudflare(); err == nil {
@@ -182,11 +264,15 @@ func Serve(cfgPath string, dirs []string) error {
 		}()
 	}
 	log.Printf("shield %s: /check on http://%s", Version, cfg.Admin)
-	err = g.Serve(ctx, cfg.Listeners)
+	<-ctx.Done()
+	edgeMu.Lock()
+	if edgeStop != nil {
+		edgeStop()
+	}
+	edgeMu.Unlock()
 	sh, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = asrv.Shutdown(sh)
-	return err
+	return asrv.Shutdown(sh)
 }
 
 func (g *Gate) autoBan(a netip.Addr, rule HTTPRule, kernel bool) {

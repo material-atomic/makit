@@ -6,7 +6,9 @@ SHIELD_UNIT=/etc/systemd/system/makit-shield.service
 shield_default_config() {
   cat <<'YAML'
 # makit shield — IP gate for web traffic. Guide: makit docs shield
-mode: observe                # block | observe (log what would be blocked) | pass (allow all) — makit shield on|off sets it
+mode: observe                # block | observe (only log what would be blocked) — makit shield mode block|observe
+ask: true                    # Caddy/nginx ask makit (/check); off = /check allows everything — makit shield ask on|off
+edge: false                  # makit in front of Caddy/nginx (listeners below) — makit shield edge on|off
 admin: 127.0.0.1:9180        # /check endpoint for Caddy forward_auth / nginx auth_request (makit shield snippet caddy|nginx)
                              # Caddy/nginx in Docker: listen on the bridge address too, e.g. 172.17.0.1:9180
 trusted_proxies: [cloudflare]   # only these peers may tell the client IP (CF-Connecting-IP); add your load balancer CIDRs
@@ -18,7 +20,7 @@ snapshot:
   path: /var/log/makit/shield/requests.jsonl
   max_mb: 50
   keep: 5
-listeners: []                # edge mode: makit in front of Caddy/nginx. Example:
+listeners: []                # used when edge is on: makit in front of Caddy/nginx. Example:
 #  - name: https
 #    listen: ":443"
 #    tls: { acme: [example.com, www.example.com], email: you@example.com }   # or { cert: origin.pem, key: origin.key }
@@ -29,9 +31,18 @@ listeners: []                # edge mode: makit in front of Caddy/nginx. Example
 YAML
 }
 
-shield_set_mode() {
-  [[ -f $SHIELD_CONF ]] || { shield_default_config | write_file "$SHIELD_CONF" 0640; }
-  run sed -i "s/^mode: [a-z]*/mode: $1/" "$SHIELD_CONF"
+shield_ensure_config() { [[ -f $SHIELD_CONF ]] || { shield_default_config | write_file "$SHIELD_CONF" 0640; }; }
+
+# shield_set KEY VALUE — edits the config through makit-core (keeps comments); the gate reloads within 2 s.
+shield_set() {
+  shield_ensure_config
+  run "$MAKIT_CORE" shield set "$1" "$2" >/dev/null
+}
+
+shield_start() {
+  shield_install_unit
+  if systemctl is-active --quiet makit-shield 2>/dev/null; then run systemctl reload makit-shield
+  else run systemctl enable --now makit-shield >/dev/null 2>&1; fi
 }
 
 shield_install_unit() {
@@ -60,6 +71,9 @@ cmd_shield() {
   case "$sub" in
     --help|help)
       echo "makit shield on [--observe] | off | status | edit | uninstall
+makit shield ask on|off      Caddy/nginx ask makit before each request (/check); off = always allow
+makit shield edge on|off     makit in front of Caddy/nginx (the listeners in $SHIELD_CONF)
+makit shield mode block|observe
 makit shield ban|unban|allow|unallow|list|check|log|snippet …   (makit shield help-core for details)
 Blocks IPs from its own set (no ipset), Cloudflare-aware: behind Cloudflare it reads the visitor's IP from
 CF-Connecting-IP, but only when the connection really comes from Cloudflare. Two ways to use it:
@@ -71,19 +85,33 @@ Docs: makit docs shield"; return ;;
       require_root; require_core
       local mode=block; [[ ${1:-} == --observe ]] && mode=observe
       step "makit shield: $mode"
-      shield_set_mode "$mode"
-      shield_install_unit
-      if systemctl is-active --quiet makit-shield 2>/dev/null; then run systemctl reload makit-shield
-      else run systemctl enable --now makit-shield >/dev/null 2>&1; fi
-      ok "gate on ($mode). Config: $SHIELD_CONF"
+      shield_set mode "$mode"
+      shield_set ask on
+      shield_start
+      ok "gate on ($mode, ask on). Config: $SHIELD_CONF"
       info "Caddy/nginx: makit shield snippet caddy|nginx · lists: makit shield ban|allow|list · requests: makit shield log"
       ;;
     off)
-      require_root
-      step "makit shield: off (pass)"
-      shield_set_mode pass
-      run systemctl reload makit-shield 2>/dev/null || true
-      ok "everything is allowed; the gate keeps answering so Caddy/nginx keep working (remove it: makit shield uninstall)"
+      require_root; require_core
+      step "makit shield: off"
+      shield_set ask off
+      shield_set edge off
+      ok "ask and edge off: everything is allowed; the gate keeps answering so Caddy/nginx keep working (remove it: makit shield uninstall)"
+      ;;
+    ask|edge)
+      require_root; require_core
+      local v=${1:-}; [[ $v == on || $v == off ]] || die "Usage: makit shield $sub on|off"
+      shield_set "$sub" "$v"
+      [[ $v == on ]] && shield_start
+      if [[ $sub == edge && $v == on ]]; then
+        grep -qE '^[[:space:]]*-[[:space:]]*name:|^[[:space:]]*-[[:space:]]*listen:' "$SHIELD_CONF" || warn "no listeners configured yet: makit shield edit (makit docs shield)"
+      fi
+      ok "$sub $v"
+      ;;
+    mode)
+      require_root; require_core
+      local v=${1:-}; [[ $v == block || $v == observe ]] || die "Usage: makit shield mode block|observe"
+      shield_set mode "$v"; ok "mode $v"
       ;;
     edit)
       require_root
@@ -103,7 +131,7 @@ Docs: makit docs shield"; return ;;
       ;;
     status)
       if systemctl is-active --quiet makit-shield 2>/dev/null; then
-        ok "running, mode $(sed -n 's/^mode: *\([a-z]*\).*/\1/p' "$SHIELD_CONF" 2>/dev/null)"
+        ok "running — mode $(sed -n 's/^mode: *\([a-z]*\).*/\1/p' "$SHIELD_CONF" 2>/dev/null), ask $(sed -n 's/^ask: *\([a-z]*\).*/\1/p' "$SHIELD_CONF" 2>/dev/null), edge $(sed -n 's/^edge: *\([a-z]*\).*/\1/p' "$SHIELD_CONF" 2>/dev/null)"
         require_core; "$MAKIT_CORE" shield status; echo
       else
         info "not running (makit shield on)"

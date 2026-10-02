@@ -13,21 +13,39 @@ import (
 	"time"
 )
 
-// Set is a set of addresses and prefixes, with optional expiry — what ipset does, in memory.
+// Set is makit's own IP set — the ipset hash:ip / hash:net design in memory: one hash table per prefix length, so a
+// lookup is at most 33 (IPv4) or 129 (IPv6) map probes whatever the size, most specific first. Each element stores
+// only its expiry and an index into a table of distinct (reason, source) pairs, so millions of entries stay compact.
 type Set struct {
-	mu      sync.RWMutex
-	entries map[netip.Prefix]Entry
+	mu    sync.RWMutex
+	v4    map[uint8]map[[4]byte]meta
+	v6    map[uint8]map[[16]byte]meta
+	bits4 []uint8 // prefix lengths present, longest first
+	bits6 []uint8
+	infos []info
+	index map[info]uint32
+	n     int
 }
+
+type meta struct {
+	until int64 // unix seconds; 0 = permanent
+	added int64
+	info  uint32
+}
+
+type info struct{ reason, source string }
 
 type Entry struct {
 	Prefix netip.Prefix `json:"prefix"`
 	Until  time.Time    `json:"until,omitempty"` // zero = permanent
 	Reason string       `json:"reason,omitempty"`
-	Source string       `json:"source,omitempty"` // manual, rule:<id>, feed:<name>
+	Source string       `json:"source,omitempty"` // manual, rule:<id>, list:<name>
 	Added  time.Time    `json:"added"`
 }
 
-func NewSet() *Set { return &Set{entries: map[netip.Prefix]Entry{}} }
+func NewSet() *Set {
+	return &Set{v4: map[uint8]map[[4]byte]meta{}, v6: map[uint8]map[[16]byte]meta{}, index: map[info]uint32{}}
+}
 
 // ParsePrefix accepts an IP or CIDR (IPv4/IPv6) and normalises it.
 func ParsePrefix(s string) (netip.Prefix, error) {
@@ -36,6 +54,9 @@ func ParsePrefix(s string) (netip.Prefix, error) {
 		p, err := netip.ParsePrefix(s)
 		if err != nil {
 			return netip.Prefix{}, err
+		}
+		if p.Addr().Is4In6() && p.Bits() >= 96 {
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		return p.Masked(), nil
 	}
@@ -47,48 +68,192 @@ func ParsePrefix(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(a, a.BitLen()), nil
 }
 
+func unix(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
+func (s *Set) infoID(reason, source string) uint32 {
+	k := info{reason, source}
+	if id, ok := s.index[k]; ok {
+		return id
+	}
+	id := uint32(len(s.infos))
+	s.infos = append(s.infos, k)
+	s.index[k] = id
+	return id
+}
+
+func insertBits(bs []uint8, b uint8) []uint8 {
+	for _, x := range bs {
+		if x == b {
+			return bs
+		}
+	}
+	bs = append(bs, b)
+	sort.Slice(bs, func(i, j int) bool { return bs[i] > bs[j] })
+	return bs
+}
+
 func (s *Set) Add(e Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if e.Added.IsZero() {
-		e.Added = time.Now()
+	s.add(e.Prefix, meta{until: unix(e.Until), added: unix(e.Added), info: s.infoID(e.Reason, e.Source)})
+}
+
+func (s *Set) add(p netip.Prefix, m meta) {
+	b := uint8(p.Bits())
+	if p.Addr().Is4() {
+		t := s.v4[b]
+		if t == nil {
+			t = map[[4]byte]meta{}
+			s.v4[b], s.bits4 = t, insertBits(s.bits4, b)
+		}
+		if _, ok := t[p.Addr().As4()]; !ok {
+			s.n++
+		}
+		t[p.Addr().As4()] = m
+		return
 	}
-	s.entries[e.Prefix] = e
+	t := s.v6[b]
+	if t == nil {
+		t = map[[16]byte]meta{}
+		s.v6[b], s.bits6 = t, insertBits(s.bits6, b)
+	}
+	if _, ok := t[p.Addr().As16()]; !ok {
+		s.n++
+	}
+	t[p.Addr().As16()] = m
+}
+
+// AddMany inserts entries sharing one reason/source/expiry (bulk lists) with a single lock.
+func (s *Set) AddMany(ps []netip.Prefix, until time.Time, reason, source string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := meta{until: unix(until), added: time.Now().Unix(), info: s.infoID(reason, source)}
+	for _, p := range ps {
+		s.add(p, m)
+	}
 }
 
 func (s *Set) Remove(p netip.Prefix) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.entries[p]
-	delete(s.entries, p)
-	return ok
-}
-
-// Match returns the live entry containing addr (most specific first).
-func (s *Set) Match(addr netip.Addr, now time.Time) (Entry, bool) {
-	addr = addr.Unmap()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	best, found := Entry{}, false
-	for p, e := range s.entries {
-		if !e.Until.IsZero() && now.After(e.Until) {
-			continue
+	b := uint8(p.Bits())
+	if p.Addr().Is4() {
+		if t := s.v4[b]; t != nil {
+			if _, ok := t[p.Addr().As4()]; ok {
+				delete(t, p.Addr().As4())
+				s.n--
+				return true
+			}
 		}
-		if p.Contains(addr) && (!found || p.Bits() > best.Prefix.Bits()) {
-			best, found = e, true
+		return false
+	}
+	if t := s.v6[b]; t != nil {
+		if _, ok := t[p.Addr().As16()]; ok {
+			delete(t, p.Addr().As16())
+			s.n--
+			return true
 		}
 	}
-	return best, found
+	return false
 }
 
-// Live returns non-expired entries, sorted.
-func (s *Set) Live(now time.Time) []Entry {
+// Len is the number of elements (expired ones included until pruned).
+func (s *Set) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]Entry, 0, len(s.entries))
-	for _, e := range s.entries {
-		if e.Until.IsZero() || now.Before(e.Until) {
-			out = append(out, e)
+	return s.n
+}
+
+func (s *Set) entry(p netip.Prefix, m meta) Entry {
+	e := Entry{Prefix: p, Reason: s.infos[m.info].reason, Source: s.infos[m.info].source}
+	if m.until != 0 {
+		e.Until = time.Unix(m.until, 0)
+	}
+	if m.added != 0 {
+		e.Added = time.Unix(m.added, 0)
+	}
+	return e
+}
+
+// Match returns the live entry containing addr, most specific prefix first.
+func (s *Set) Match(addr netip.Addr, now time.Time) (Entry, bool) {
+	addr = addr.Unmap()
+	ts := now.Unix()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if addr.Is4() {
+		a := addr.As4()
+		for _, b := range s.bits4 {
+			k := mask4(a, b)
+			if m, ok := s.v4[b][k]; ok && (m.until == 0 || ts < m.until) {
+				return s.entry(netip.PrefixFrom(netip.AddrFrom4(k), int(b)), m), true
+			}
+		}
+		return Entry{}, false
+	}
+	a := addr.As16()
+	for _, b := range s.bits6 {
+		k := mask16(a, b)
+		if m, ok := s.v6[b][k]; ok && (m.until == 0 || ts < m.until) {
+			return s.entry(netip.PrefixFrom(netip.AddrFrom16(k), int(b)), m), true
+		}
+	}
+	return Entry{}, false
+}
+
+func mask4(a [4]byte, bits uint8) [4]byte {
+	for i := 0; i < 4; i++ {
+		switch {
+		case bits >= 8:
+			bits -= 8
+		case bits == 0:
+			a[i] = 0
+		default:
+			a[i] &= ^byte(0xff >> bits)
+			bits = 0
+		}
+	}
+	return a
+}
+
+func mask16(a [16]byte, bits uint8) [16]byte {
+	for i := 0; i < 16; i++ {
+		switch {
+		case bits >= 8:
+			bits -= 8
+		case bits == 0:
+			a[i] = 0
+		default:
+			a[i] &= ^byte(0xff >> bits)
+			bits = 0
+		}
+	}
+	return a
+}
+
+// Live returns non-expired entries, sorted (for small sets: listings and the kernel sync of manual bans).
+func (s *Set) Live(now time.Time) []Entry {
+	ts := now.Unix()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Entry, 0, s.n)
+	for b, t := range s.v4 {
+		for k, m := range t {
+			if m.until == 0 || ts < m.until {
+				out = append(out, s.entry(netip.PrefixFrom(netip.AddrFrom4(k), int(b)), m))
+			}
+		}
+	}
+	for b, t := range s.v6 {
+		for k, m := range t {
+			if m.until == 0 || ts < m.until {
+				out = append(out, s.entry(netip.PrefixFrom(netip.AddrFrom16(k), int(b)), m))
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Prefix.String() < out[j].Prefix.String() })
@@ -97,15 +262,27 @@ func (s *Set) Live(now time.Time) []Entry {
 
 // Prune drops expired entries and reports how many were removed.
 func (s *Set) Prune(now time.Time) int {
+	ts := now.Unix()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
-	for p, e := range s.entries {
-		if !e.Until.IsZero() && now.After(e.Until) {
-			delete(s.entries, p)
-			n++
+	for _, t := range s.v4 {
+		for k, m := range t {
+			if m.until != 0 && ts >= m.until {
+				delete(t, k)
+				n++
+			}
 		}
 	}
+	for _, t := range s.v6 {
+		for k, m := range t {
+			if m.until != 0 && ts >= m.until {
+				delete(t, k)
+				n++
+			}
+		}
+	}
+	s.n -= n
 	return n
 }
 

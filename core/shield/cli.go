@@ -20,12 +20,18 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
   unban IP|CIDR
   allow IP|CIDR [--reason TEXT] never blocked (whitelist)
   unallow IP|CIDR
-  list [--json]                 block and allow entries with expiry
+  list [--json]                 block and allow entries with expiry, and bulk list sizes
+  import FILE --name NAME [--for 7d] [--reason TEXT]
+                                load a bulk list (one IP/CIDR per line; feeds with comments are fine) — millions OK
+  lists                         bulk lists with their sizes
+  drop-list NAME                remove a bulk list
   check --peer IP [--client IP] [--uri /path] [--method GET] [--ua TEXT]
                                 what the gate would decide (uses the current config, lists and rules)
   log [-n 50] [--blocked]       recent request snapshots
   status                        live counters from the running gate
   cloudflare-update             refresh Cloudflare's IP ranges now
+  set mode block|observe|pass · set ask on|off · set edge on|off
+                                change a switch in the config (the running gate reloads within 2 s)
   snippet caddy|nginx [--addr 127.0.0.1:9180]
                                 configuration that makes Caddy/nginx ask makit before every request
 `
@@ -51,6 +57,15 @@ func Main(args []string, dirs []string) int {
 		err = cmdRemove(sub, rest)
 	case "list":
 		err = cmdList(rest)
+	case "import":
+		err = cmdImport(rest)
+	case "lists":
+		err = cmdLists()
+	case "drop-list":
+		name, _ := splitFirst(rest)
+		if err = RemoveList(name); err == nil {
+			fmt.Printf("list %s removed\n", name)
+		}
 	case "check":
 		err = cmdCheck(cfgPath, dirs, rest)
 	case "log":
@@ -64,6 +79,12 @@ func Main(args []string, dirs []string) int {
 		}
 	case "snippet":
 		err = cmdSnippet(rest)
+	case "set":
+		if len(rest) != 2 {
+			err = fmt.Errorf("usage: set mode|ask|edge VALUE")
+		} else if err = SetConfig(cfgPath, rest[0], rest[1]); err == nil {
+			fmt.Printf("%s = %s\n", rest[0], rest[1])
+		}
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -181,6 +202,40 @@ func cmdList(args []string) error {
 	}
 	show("blocked", st.Block)
 	show("allowed", st.Allow)
+	return cmdLists()
+}
+
+func cmdImport(args []string) error {
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	name := fs.String("name", "", "list name (letters, digits, - _)")
+	dur := fs.Duration("for", 0, "expire the whole list after this long")
+	reason := fs.String("reason", "", "why")
+	file, rest := splitFirst(args)
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	start := time.Now()
+	l, bad, err := ImportList(*name, file, *dur, *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("list %s: %d entries (%d invalid lines skipped) in %s — the running gate loads it within 2 s\n", l.Name, l.Count, bad, time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+func cmdLists() error {
+	ls, err := Lists()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("bulk lists (%d)\n", len(ls))
+	for _, l := range ls {
+		exp := "permanent"
+		if !l.Until.IsZero() {
+			exp = "until " + l.Until.Format("2006-01-02 15:04")
+		}
+		fmt.Printf("  %-20s %10d  %-24s %s\n", l.Name, l.Count, exp, l.Reason)
+	}
 	return nil
 }
 
@@ -198,7 +253,7 @@ func cmdCheck(cfgPath string, dirs []string, args []string) error {
 	if err != nil {
 		return err
 	}
-	p, _, err := buildPolicy(cfg, dirs)
+	p, _, err := buildPolicy(cfg, dirs, nil)
 	if err != nil {
 		return err
 	}

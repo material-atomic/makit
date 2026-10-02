@@ -37,7 +37,8 @@ type Policy struct {
 	Pass    bool           // shield off: allow everything (keeps proxies working)
 	Trusted []netip.Prefix // proxies whose client-IP header is believed (Cloudflare, your load balancer)
 	Allow   *Set
-	Block   *Set
+	Block   *Set // manual and automatic bans (state.json)
+	Lists   *Set // bulk lists (lists/*.txt), may hold millions
 	Rules   []HTTPRule
 	Ban     func(addr netip.Addr, rule HTTPRule) // auto-ban hook for rules with ban_for
 }
@@ -98,6 +99,11 @@ func (p *Policy) Decide(r Request) Decision {
 	for _, a := range []netip.Addr{client, peer} {
 		if e, ok := p.Block.Match(a, now); ok {
 			return block(e.Source, e.Prefix.String()+" "+e.Reason)
+		}
+		if p.Lists != nil {
+			if e, ok := p.Lists.Match(a, now); ok {
+				return block(e.Source, e.Prefix.String()+" "+e.Reason)
+			}
 		}
 	}
 	for _, rule := range p.Rules {

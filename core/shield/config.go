@@ -35,7 +35,9 @@ type Listener struct {
 }
 
 type Config struct {
-	Mode           string     `yaml:"mode"` // block | observe | pass
+	Mode           string     `yaml:"mode"` // block | observe (pass = allow everything)
+	Ask            bool       `yaml:"ask"`  // /check enforces (Caddy/nginx ask makit); off = /check always allows
+	Edge           bool       `yaml:"edge"` // makit in front: run the listeners
 	Listeners      []Listener `yaml:"listeners"`
 	TrustedProxies []string   `yaml:"trusted_proxies"` // "cloudflare" or CIDRs whose client-IP header is believed
 	ClientHeader   string     `yaml:"client_ip_header"`
@@ -52,7 +54,7 @@ type Config struct {
 }
 
 func LoadConfig(path string) (*Config, error) {
-	c := &Config{Mode: "observe", ClientHeader: "CF-Connecting-IP", TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
+	c := &Config{Mode: "observe", Ask: true, ClientHeader: "CF-Connecting-IP", TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
 	c.Snapshot.Path, c.Snapshot.MaxMB, c.Snapshot.Keep = "/var/log/makit/shield/requests.jsonl", 50, 5
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -143,4 +145,64 @@ func UpdateCloudflare() (int, error) {
 		return 0, err
 	}
 	return len(lines), os.Rename(tmp, cfCache())
+}
+
+// SetConfig changes one top-level key (mode, ask, edge) in the YAML file, keeping comments and the rest as written.
+func SetConfig(path, key, value string) error {
+	switch key {
+	case "mode":
+		if value != "block" && value != "observe" && value != "pass" {
+			return fmt.Errorf("mode: block, observe or pass")
+		}
+	case "ask", "edge":
+		switch value {
+		case "on", "true":
+			value = "true"
+		case "off", "false":
+			value = "false"
+		default:
+			return fmt.Errorf("%s: on or off", key)
+		}
+	default:
+		return fmt.Errorf("unknown setting %q (mode, ask, edge)", key)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return err
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: not a YAML mapping", path)
+	}
+	m := doc.Content[0]
+	tag := "!!str"
+	if key != "mode" {
+		tag = "!!bool"
+	}
+	found := false
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content[i+1].Value, m.Content[i+1].Tag, m.Content[i+1].Kind = value, tag, yaml.ScalarNode
+			found = true
+		}
+	}
+	if !found {
+		m.Content = append([]*yaml.Node{{Kind: yaml.ScalarNode, Value: key}, {Kind: yaml.ScalarNode, Value: value, Tag: tag}}, m.Content...)
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o640); err != nil {
+		return err
+	}
+	if _, err := LoadConfig(tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }

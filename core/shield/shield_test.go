@@ -101,21 +101,32 @@ func TestDecide(t *testing.T) {
 	}
 }
 
-func TestNftScriptSafety(t *testing.T) {
+func TestNftScriptSafetyAndBatches(t *testing.T) {
 	now := time.Now()
 	s := NftScript([]Entry{
 		{Prefix: pfx("198.51.100.9")}, {Prefix: pfx("203.0.113.0/24"), Until: now.Add(time.Hour)},
 		{Prefix: pfx("10.1.2.3")}, {Prefix: pfx("127.0.0.1")}, {Prefix: pfx("0.0.0.0/0")}, {Prefix: pfx("2001:db8::1")},
 	}, now)
-	for _, want := range []string{"198.51.100.9", "203.0.113.0/24 timeout", "2001:db8::1", "priority raw", "ip saddr @block4 counter drop"} {
+	for _, want := range []string{"198.51.100.9", "203.0.113.0/24 timeout", "2001:db8::1", "priority raw", "ip saddr @block4 counter drop", "ip6 saddr @list6net counter drop", "flush set inet makit_shield block4"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in\n%s", want, s)
 		}
 	}
-	for _, bad := range []string{"10.1.2.3", "127.0.0.1", "0.0.0.0/0"} {
+	for _, bad := range []string{"10.1.2.3", "127.0.0.1", "0.0.0.0/0", "delete table"} {
 		if strings.Contains(s, bad) {
-			t.Errorf("unsafe %s reached the kernel set", bad)
+			t.Errorf("unsafe %s in the kernel script", bad)
 		}
+	}
+	l := NewSet()
+	var ps []netip.Prefix
+	for i := 0; i < 45000; i++ {
+		ps = append(ps, netip.PrefixFrom(netip.AddrFrom4([4]byte{100, 0, byte(i >> 8), byte(i)}), 32))
+	}
+	l.AddMany(ps, time.Time{}, "feed", "list:test")
+	l.Add(Entry{Prefix: pfx("192.0.2.0/24")})
+	b := NftListBatches(l, now, 20000)
+	if len(b) != 1+3+1 || !strings.Contains(b[0], "flush set inet makit_shield list4ip") || !strings.Contains(b[4], "list4net") {
+		t.Errorf("batches: %d", len(b))
 	}
 }
 
@@ -148,8 +159,14 @@ func gate(t *testing.T) *Gate {
 	return g
 }
 
+func askingGate(t *testing.T) *Gate {
+	g := gate(t)
+	g.ask.Store(true)
+	return g
+}
+
 func TestCheckHandler(t *testing.T) {
-	h := gate(t).checkHandler()
+	h := askingGate(t).checkHandler()
 	ask := func(remote string, hdr map[string]string) int {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:9180/check", nil)
 		r.RemoteAddr = remote
@@ -222,5 +239,138 @@ func TestRuleDocsExist(t *testing.T) {
 		if anchor != "" && !strings.Contains(strings.ToLower(string(b)), "\n## "+strings.ReplaceAll(anchor, "-", " ")) {
 			t.Errorf("%s: no heading #%s in %s", r.ID, anchor, file)
 		}
+	}
+}
+
+func TestSetConfigKeepsComments(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "shield.yaml")
+	if err := os.WriteFile(f, []byte("# my notes\nmode: observe   # keep this\nallow: [192.0.2.1]\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{{"mode", "block"}, {"ask", "off"}, {"edge", "on"}} {
+		if err := SetConfig(f, kv[0], kv[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := LoadConfig(f)
+	if err != nil || c.Mode != "block" || c.Ask || !c.Edge || len(c.Allow) != 1 {
+		t.Fatalf("config %+v %v", c, err)
+	}
+	b, _ := os.ReadFile(f)
+	if !strings.Contains(string(b), "# my notes") || !strings.Contains(string(b), "# keep this") {
+		t.Errorf("comments lost:\n%s", b)
+	}
+	if SetConfig(f, "mode", "nonsense") == nil || SetConfig(f, "ask", "maybe") == nil || SetConfig(f, "port", "1") == nil {
+		t.Error("invalid values accepted")
+	}
+}
+
+func TestAskSwitch(t *testing.T) {
+	g := gate(t)
+	h := g.checkHandler()
+	r := httptest.NewRequest("GET", "http://127.0.0.1:9180/check", nil)
+	r.RemoteAddr = "127.0.0.1:1"
+	r.Header.Set("X-Makit-Peer", "198.51.100.9")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r) // ask is off by default in a fresh Gate
+	if w.Code != 200 {
+		t.Errorf("ask off must allow: %d", w.Code)
+	}
+	g.ask.Store(true)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Errorf("ask on must block: %d", w.Code)
+	}
+}
+
+func TestListsImportAndMatch(t *testing.T) {
+	StateDir = t.TempDir()
+	src := filepath.Join(t.TempDir(), "drop.txt")
+	feed := "; Spamhaus DROP style\n198.51.100.0/24 ; SBL1\n203.0.113.5\n# comment\nnot-an-ip\n2001:db8:dead::/48\n"
+	if err := os.WriteFile(src, []byte(feed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, bad, err := ImportList("drop", src, 24*time.Hour, "Spamhaus DROP")
+	if err != nil || l.Count != 3 || bad != 1 {
+		t.Fatalf("import: %+v bad=%d err=%v", l, bad, err)
+	}
+	set, fp, err := LoadLists()
+	if err != nil || set.Len() != 3 || fp == "" {
+		t.Fatalf("load: %d %v", set.Len(), err)
+	}
+	e, ok := set.Match(netip.MustParseAddr("198.51.100.77"), time.Now())
+	if !ok || e.Source != "list:drop" || e.Reason != "Spamhaus DROP" || e.Until.IsZero() {
+		t.Errorf("match: %+v %v", e, ok)
+	}
+	if _, ok := set.Match(netip.MustParseAddr("2001:db8:dead:1::1"), time.Now()); !ok {
+		t.Error("IPv6 range from list")
+	}
+	if _, _, err := ImportList("Bad Name", src, 0, ""); err == nil {
+		t.Error("invalid list name accepted")
+	}
+}
+
+// One million banned addresses and 100k ranges: lookups must stay O(prefix lengths), not O(entries).
+func TestMillionEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large")
+	}
+	s := NewSet()
+	ps := make([]netip.Prefix, 0, 1_000_000)
+	for i := 0; i < 1_000_000; i++ {
+		ps = append(ps, netip.PrefixFrom(netip.AddrFrom4([4]byte{byte(11 + i>>24), byte(i >> 16), byte(i >> 8), byte(i)}), 32))
+	}
+	start := time.Now()
+	s.AddMany(ps, time.Time{}, "feed", "list:big")
+	nets := make([]netip.Prefix, 0, 100_000)
+	for i := 0; i < 100_000; i++ {
+		nets = append(nets, netip.PrefixFrom(netip.AddrFrom4([4]byte{byte(60 + i>>16), byte(i >> 8), byte(i), 0}), 24))
+	}
+	s.AddMany(nets, time.Time{}, "feed", "list:nets")
+	build := time.Since(start)
+	if s.Len() != 1_100_000 {
+		t.Fatalf("len %d", s.Len())
+	}
+	now := time.Now()
+	start = time.Now()
+	const n = 200_000
+	hits := 0
+	for i := 0; i < n; i++ {
+		a := netip.AddrFrom4([4]byte{byte(11 + i>>24), byte(i >> 16), byte(i >> 8), byte(i)})
+		if _, ok := s.Match(a, now); ok {
+			hits++
+		}
+		if j := i % 100_000; true {
+			if _, ok := s.Match(netip.AddrFrom4([4]byte{byte(60 + j>>16), byte(j >> 8), byte(j), 200}), now); ok {
+				hits++
+			}
+		}
+		if false {
+			hits++
+		}
+	}
+	per := time.Since(start) / (2 * n)
+	t.Logf("1.1M entries built in %s; %s per lookup", build.Round(time.Millisecond), per)
+	if hits != 2*n {
+		t.Errorf("hits %d", hits)
+	}
+	if per > 5*time.Microsecond {
+		t.Errorf("lookup too slow: %s", per)
+	}
+}
+
+func BenchmarkMatchMillion(b *testing.B) {
+	s := NewSet()
+	ps := make([]netip.Prefix, 0, 1_000_000)
+	for i := 0; i < 1_000_000; i++ {
+		ps = append(ps, netip.PrefixFrom(netip.AddrFrom4([4]byte{byte(11 + i>>24), byte(i >> 16), byte(i >> 8), byte(i)}), 32))
+	}
+	s.AddMany(ps, time.Time{}, "feed", "list:big")
+	s.Add(Entry{Prefix: pfx("60.0.0.0/8")})
+	now := time.Now()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.Match(netip.AddrFrom4([4]byte{byte(11 + i>>24), byte(i >> 16), byte(i >> 8), byte(i)}), now)
 	}
 }

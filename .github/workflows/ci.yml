@@ -96,6 +96,7 @@ jobs:
           sudo sed -i 's#^trusted_proxies: .*#trusted_proxies: [cloudflare, 127.0.0.1/32]#; s#^kernel_block: .*#kernel_block: true#' /etc/makit/shield.yaml
           printf 'listeners:\n  - name: edge\n    listen: "127.0.0.1:8090"\n    upstream: http://127.0.0.1:8091\n' | sudo tee -a /etc/makit/shield.yaml
           sudo sed -i 's#^listeners: \[\].*##' /etc/makit/shield.yaml
+          sudo makit shield edge on
           sudo systemctl restart makit-shield && sleep 2
           (mkdir -p /tmp/www && echo hello > /tmp/www/index.html && cd /tmp/www && python3 -m http.server 8091 --bind 127.0.0.1 &) ; sleep 1
           cat > /tmp/Caddyfile <<'CADDY'
@@ -129,6 +130,12 @@ jobs:
           sudo makit shield allow 198.51.100.30 && sleep 3
           test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/)" = 200        # allowlist wins
           sudo nft list set inet makit_shield block4 | grep -q 203.0.113.9
+          printf '# feed\n192.0.2.0/24 ; test range\n198.51.100.200\n' > /tmp/feed.txt
+          sudo makit shield import /tmp/feed.txt --name ci-feed --for 1h --reason "ci feed" && sleep 3
+          test "$(code -H 'CF-Connecting-IP: 192.0.2.77' http://127.0.0.1:8088/)" = 403        # bulk list
+          sudo nft list set inet makit_shield list4net | grep -q 192.0.2.0/24
+          sudo makit shield edge off && sleep 3
+          if curl -s -m 3 http://127.0.0.1:8090/ >/dev/null; then echo "edge still listening"; exit 1; fi
           sudo makit shield list
           sudo makit shield log --blocked
           sudo makit shield status

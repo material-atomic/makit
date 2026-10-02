@@ -23,6 +23,7 @@ import (
 // Gate holds the live policy; reloads swap it atomically.
 type Gate struct {
 	policy atomic.Pointer[Policy]
+	ask    atomic.Bool // /check enforces; off = always allow
 	rec    *Recorder
 	header string
 	onBan  func(netip.Addr, HTTPRule)
@@ -69,7 +70,11 @@ func (l *guardListener) Accept() (net.Conn, error) {
 		if _, ok := p.Allow.Match(addr, time.Now()); ok {
 			return c, nil
 		}
-		if e, ok := p.Block.Match(addr, time.Now()); ok {
+		e, ok := p.Block.Match(addr, time.Now())
+		if !ok && p.Lists != nil {
+			e, ok = p.Lists.Match(addr, time.Now())
+		}
+		if ok {
 			l.g.count("dropped")
 			l.g.rec.Write(Snapshot{Time: time.Now(), Listener: l.name, Decision: Decision{Client: addr.String(), Peer: addr.String(),
 				Verdict: "dropped", Rule: e.Source, Reason: "connection closed: " + e.Prefix.String() + " " + e.Reason}})
