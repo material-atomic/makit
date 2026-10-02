@@ -117,6 +117,18 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 	}
 	// Rewrite (not Director): the outgoing request starts without X-Forwarded-* headers, so nothing a client sent
 	// survives; makit sets them from its own decision.
+	// Keep connections to the upstream open and reuse them: Go's default keeps only 2 idle per host, so under load
+	// every request would open a new TCP connection (latency, then 502s when ephemeral ports run out).
+	tr := &http.Transport{
+		Proxy:                 nil, // never send visitors' traffic through an environment proxy
+		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		MaxIdleConns:          4096,
+		MaxIdleConnsPerHost:   1024,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		ForceAttemptHTTP2:     true,
+	}
 	rp := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
 		pr.SetURL(u)
 		pr.Out.Host = pr.In.Host // upstream virtual hosts keep working
@@ -127,8 +139,9 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 		pr.Out.Header.Del("X-Makit-Proto")
 	}}
 	if l.InsecureUpstreamTLS {
-		rp.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, ForceAttemptHTTP2: true}
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
+	rp.Transport = tr
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("shield: %s upstream %s: %v", l.Name, l.Upstream, err)
 		w.WriteHeader(http.StatusBadGateway)

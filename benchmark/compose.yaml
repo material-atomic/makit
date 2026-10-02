@@ -1,0 +1,28 @@
+# makit benchmark stack — started by benchmark/run.sh. Everything stays on this project's network: no host ports.
+name: makit-bench
+services:
+  app:
+    image: caddy:2-alpine
+    volumes: ["./Caddyfile.app:/etc/caddy/Caddyfile:ro"]
+  proxy:
+    image: caddy:2-alpine
+    volumes: ["./Caddyfile.proxy:/etc/caddy/Caddyfile:ro"]
+    depends_on: [app, makit]
+  makit:
+    image: caddy:2-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - /bench/.bin/load gen-list "$${LIST_SIZE}" > /tmp/list.txt
+        && /bench/.bin/makit-core shield import /tmp/list.txt --name bench --reason benchmark >/dev/null
+        && exec /bench/.bin/makit-core shield serve
+    environment:
+      MAKIT_SHIELD_CONFIG: /bench/shield.yaml
+      MAKIT_SECURITY: /repo/security
+      LIST_SIZE: ${LIST_SIZE:-1000000}
+    volumes: ["./:/bench:ro", "../security:/repo/security:ro"]
+    depends_on: [app]
+  load:
+    image: caddy:2-alpine
+    entrypoint: ["/bench/.bin/load"]
+    volumes: ["./:/bench"]
+    profiles: [load]

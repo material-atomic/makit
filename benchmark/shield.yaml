@@ -1,0 +1,18 @@
+# makit shield for the benchmark: everything a production gate does is on — rules, scoring, bots, snapshots,
+# a 1,000,000-entry block list — in block mode. Clients come through a "proxy" (private ranges are trusted) with
+# CF-Connecting-IP spread over 100,000 visitors.
+mode: block
+ask: true
+edge: true
+admin: 0.0.0.0:9180
+trusted_proxies: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+client_ip_header: CF-Connecting-IP
+rules: true
+snapshot:
+  path: /var/log/makit/shield/requests.jsonl
+  max_mb: 200
+  keep: 2
+listeners:
+  - name: http
+    listen: ":8080"
+    upstream: http://app:80

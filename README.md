@@ -2,7 +2,20 @@
 
 [![ci](https://github.com/material-atomic/makit/actions/workflows/ci.yml/badge.svg)](https://github.com/material-atomic/makit/actions/workflows/ci.yml)
 
-Bootstrap a fresh Ubuntu or Debian server with one command, safely and repeatably.
+Security for Linux servers you run yourself — find what is wrong, block what attacks, and set up new servers safely.
+One command-line tool (`makit`), MIT-licensed, for Ubuntu and Debian.
+
+| | What makit does |
+| --- | --- |
+| **Check** — `makit scan` | Read-only security check of the host and every Docker container (with your consent): malware and miner indicators, suspicious processes and connections, persistence, vulnerable npm packages (OSV), and posture — SSH, firewall, Docker ports, updates, kernel, secrets. Every finding links to a guide. |
+| **Protect** — `makit shield` | A gate in front of your web traffic: its own IP set (millions of entries, no ipset), allowlist, Cloudflare-aware client IPs, HTTP rules, request scoring (probes, XSS, SQL injection…), bots/crawlers/AI agents verified and handled by your policy, rate limits, automatic bans. Works with Caddy/nginx asking it, or in front of them. |
+| **Alert** — `makit notify`, `makit schedule` | Scheduled scans and ban reports to Telegram, Slack, Google Chat, Discord, Teams, ntfy, webhooks or email. |
+| **Set up and harden** — `makit init` | A fresh server in one command: upgrades, swap, Docker, firewall (Docker ports included), automatic updates, kernel and SSH hardening, fail2ban, AppArmor, auditd — idempotent, with `--dry-run`. |
+| **Watch** — `makit top` | A terminal dashboard: system, processes, containers, services, logs, setup. |
+
+The threat knowledge — rules, scoring sets, the bot catalog, vulnerabilities — is data in [`security/`](security/),
+updated with `makit rules update` and overridable per server. What the shield costs per request is measured in
+[`benchmark/`](benchmark/), reproducible with one command.
 
 Install (as root):
 
@@ -10,7 +23,7 @@ Install (as root):
 curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.4.0/install.sh | bash
 ```
 
-Set up the server — preview first, then apply:
+Set up a new server — preview first, then apply:
 
 ```bash
 makit init --dry-run

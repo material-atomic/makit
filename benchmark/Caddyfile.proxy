@@ -1,0 +1,17 @@
+# Caddy in front of the app: :81 without makit (baseline), :82 asking makit before every request (ask mode).
+{
+	admin off
+	auto_https off
+}
+:81 {
+	reverse_proxy app:80
+}
+:82 {
+	forward_auth makit:9180 {
+		uri /check
+		header_up X-Makit-Peer {remote_host}
+		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+		copy_headers X-Makit-Client
+	}
+	reverse_proxy app:80
+}
