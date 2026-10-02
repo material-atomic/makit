@@ -131,6 +131,43 @@ else (a git repo of your own, for example), point to it: `scoring: { file: /srv/
 Known bots are recognised and verified, and you decide per category or per bot: allow, log, block, ban or rate
 limit. Clients that hide what they are get a separate bot score. See [Bots, crawlers and AI agents](bots.md).
 
+## Batch reports and alerts
+
+The gate sums up what it saw every five minutes, without anyone running a command: totals, then one block per
+suspicious IP with its level and score, what it did in plain words, sample paths, the statuses it got, and what makit
+did about it. Known bots handled by your policy are one line; ordinary visitors are only counted.
+
+```
+makit shield · blogcode.vn · 2026-05-21 14:40–14:45 UTC
+511 requests · 3 suspicious IPs · 1 banned · blocked 2 · limited 2 · critical 2 · high 1
+
+[CRITICAL 170] 91.238.181.96 · 1 req · blocked 1
+   malformed or empty request line · RDP scan on the HTTP port · no User-Agent
+   (empty or binary request line) · status 403×1
+
+[CRITICAL 115] 85.204.70.96 · 5 req · banned until 05-22 14:40 UTC (score:critical)
+   WordPress probing ×5 · no User-Agent ×5
+   /wp1/wp-includes/wlwmanifest.xml, /cms/wp-includes/wlwmanifest.xml, +3 · status 500×5
+
+[HIGH] 203.0.113.50 · 1 req · blocked 1
+   fake Googlebot
+
+bots: GPTBot 4 (verified, 2 denied) · Googlebot 1 (fake, 1 denied)
+
+⚠ your app answered 5xx to 5 suspicious requests — unknown paths should return 404, not an error
+```
+
+Each report is appended to `/var/log/makit/shield/reports/<date>.txt` (and `.jsonl` for tools), kept 30 days, and
+sent through [`makit notify`](notifications.md) when it contains something at `report.min_level` or above, a ban, or
+a fake bot — one message per window, never one per request or per ban. `makit shield report [-n 3]` prints the latest.
+
+```yaml
+report:
+  every: 5m          # 1m or more; "off" for no reports
+  min_level: high    # low, medium, high, critical
+  keep_days: 30
+```
+
 ## Snapshots
 
 Each decision is a JSON line in `/var/log/makit/shield/requests.jsonl` (rotated): time, client IP, peer, proxy,

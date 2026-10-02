@@ -55,7 +55,31 @@ type Config struct {
 		ScoringOverrides `yaml:",inline"`
 		File             string `yaml:"file"` // your own scoring file instead of the catalog's (same format)
 	} `yaml:"scoring"`
-	Bots BotsConfig `yaml:"bots"` // known bots / AI agents policy and the bot score
+	Bots   BotsConfig   `yaml:"bots"` // known bots / AI agents policy and the bot score
+	Report ReportConfig `yaml:"report"`
+}
+
+// ReportConfig: batch reports of what the gate saw, saved to files and sent through makit notify.
+type ReportConfig struct {
+	Every    string `yaml:"every"`     // window, default 5m; "off" disables reports
+	MinLevel string `yaml:"min_level"` // send when the batch reaches this level (low, medium, high, critical); bans and fake bots always
+	Dir      string `yaml:"dir"`       // default /var/log/makit/shield/reports
+	KeepDays int    `yaml:"keep_days"` // default 30
+}
+
+func (r ReportConfig) Window() (time.Duration, bool) {
+	if r.Every == "off" {
+		return 0, false
+	}
+	d, err := parseDur(firstNonEmpty(r.Every, "5m"))
+	if err != nil || d < time.Minute {
+		d = 5 * time.Minute
+	}
+	return d, true
+}
+
+func (r ReportConfig) Directory() string {
+	return firstNonEmpty(r.Dir, "/var/log/makit/shield/reports")
 }
 
 func LoadConfig(path string) (*Config, error) {

@@ -2,7 +2,9 @@
 
 **Command:** `makit notify`
 
-makit can tell you when something happens — a ban, a critical score, a scheduled scan with findings — on Telegram,
+makit tells you when something happens — on its own, no command to run: the shield's
+[batch report](shield.md#batch-reports-and-alerts) every five minutes when it has bans, fake bots or high/critical
+traffic, and scheduled scans with findings — on Telegram,
 Slack, Google Chat, Discord, Microsoft Teams, ntfy, any JSON webhook, or email. Channels live in
 `/etc/makit/notify.yaml` (mode 600, because it holds tokens).
 

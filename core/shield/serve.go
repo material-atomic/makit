@@ -107,12 +107,12 @@ func (g *Gate) checkHandler() http.Handler {
 				w.Header().Set("Retry-After", "60")
 			}
 			snap.Status = code
-			g.rec.Write(snap)
+			g.record(snap)
 			http.Error(w, http.StatusText(code), code)
 			return
 		}
 		snap.Status = http.StatusOK
-		g.rec.Write(snap)
+		g.record(snap)
 		w.WriteHeader(http.StatusOK)
 	})
 }
@@ -137,19 +137,20 @@ func Serve(cfgPath string, dirs []string) error {
 		return err
 	}
 	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
-	// Ban batches go to every channel of `makit notify` whose min_level allows "high" (read at each send, so channels
-	// added later work without a restart).
-	g.notify = func(text string) {
+	// Batch reports go to every channel of `makit notify` whose min_level they reach (the channel file is read at
+	// each send, so channels added later work without a restart).
+	g.send = func(title, text, level string) {
 		go func() {
 			c, err := notify.Load(notifyConfig())
 			if err != nil || len(c.Channels) == 0 {
 				return
 			}
-			for _, err := range c.Send(notify.Message{Title: "makit shield", Text: text, Level: "high", Source: "shield"}, "") {
+			for _, err := range c.Send(notify.Message{Title: title, Text: text, Level: level, Source: "shield"}, "") {
 				log.Printf("shield: notify: %v", err)
 			}
 		}()
 	}
+	g.rep = NewReporter(time.Now())
 	// Edge listeners start/stop with the "edge" switch and restart when their configuration changes.
 	var edgeMu sync.Mutex
 	var edgeStop context.CancelFunc
@@ -190,7 +191,8 @@ func Serve(cfgPath string, dirs []string) error {
 	var lists *Set
 	var listsFP string
 	kernelWasOn := false
-	var loadMu sync.Mutex // reloads come from the poller, SIGHUP and feed downloads
+	var current atomic.Pointer[Config] // the config in force, for the report loop
+	var loadMu sync.Mutex              // reloads come from the poller, SIGHUP and feed downloads
 	load := func() error {
 		loadMu.Lock()
 		defer loadMu.Unlock()
@@ -237,6 +239,16 @@ func Serve(cfgPath string, dirs []string) error {
 		}
 		p.Limiter = limiter
 		cfg = c
+		current.Store(c)
+		labels := map[string]string{}
+		for _, sc := range []*Scoring{p.Scoring, p.BotScore} {
+			if sc != nil {
+				for k, v := range sc.Labels() {
+					labels[k] = v
+				}
+			}
+		}
+		g.rep.SetLabels(labels)
 		g.header = c.ClientHeader
 		g.policy.Store(p)
 		g.ask.Store(c.Ask && c.Mode != "pass")
@@ -264,6 +276,7 @@ func Serve(cfgPath string, dirs []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go g.banWriter(ctx)
+	go g.reportLoop(ctx, func() *Config { return current.Load() })
 
 	mux := http.NewServeMux()
 	mux.Handle("/check", g.checkHandler())
@@ -483,8 +496,8 @@ func (g *Gate) flushBans() {
 		msg += fmt.Sprintf("; %d more banned in memory only (queue full)", drops)
 	}
 	log.Printf("shield: %s", msg)
-	if g.notify != nil {
-		g.notify(msg)
+	for _, e := range batch {
+		g.rep.Banned(e) // reported (and notified) with the batch report, not one message per ban
 	}
 }
 
@@ -524,4 +537,55 @@ func notifyConfig() string {
 		return p
 	}
 	return notify.DefaultConfig
+}
+
+// reportLoop closes a batch report every report.every, saves it and sends it when it is worth it.
+func (g *Gate) reportLoop(ctx context.Context, cfg func() *Config) {
+	host, _ := os.Hostname()
+	for {
+		c := cfg()
+		every, on := c.Report.Window()
+		if !on {
+			every = time.Minute // reports off: check again later, keep the window empty
+		}
+		select {
+		case <-ctx.Done():
+			if on {
+				g.emitReport(c, host)
+			}
+			return
+		case <-time.After(every):
+		}
+		if !on {
+			g.rep.Flush(time.Now(), host)
+			continue
+		}
+		g.emitReport(cfg(), host)
+	}
+}
+
+func (g *Gate) emitReport(c *Config, host string) {
+	b := g.rep.Flush(time.Now(), host)
+	if b == nil {
+		return
+	}
+	if err := b.Save(c.Report.Directory(), max(c.Report.KeepDays, 0)+30*boolInt(c.Report.KeepDays == 0)); err != nil {
+		log.Printf("shield: report: %v", err)
+	}
+	if !b.Worth(c.Report.MinLevel) || g.send == nil {
+		return
+	}
+	level := map[string]string{"critical": "critical", "high": "high", "bot": "high", "medium": "medium", "likely": "medium"}[b.Level]
+	if level == "" || (b.Banned > 0 && levelRank[level] < levelRank["high"]) {
+		level = "high"
+	}
+	title := fmt.Sprintf("%d suspicious IPs, %d banned", len(b.IPs)+b.MoreIPs, b.Banned)
+	g.send(title, b.Text, level)
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

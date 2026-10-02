@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,6 +34,8 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
   cloudflare-update             refresh Cloudflare's IP ranges now
   set mode block|observe|pass · set ask on|off · set edge on|off
                                 change a switch in the config (the running gate reloads within 2 s)
+  report [-n 1] [--date YYYY-MM-DD]
+                                the latest batch reports (also sent through makit notify when worth it)
   bots …                        known bots, crawlers and AI agents: policy per category or agent (makit shield bots help)
   customize scoring|bots|rules [--to /etc/makit/security]
                                 copy catalog files to edit locally; your copies override the bundled ones
@@ -90,6 +94,8 @@ func Main(args []string, dirs []string) int {
 		}
 	case "bots":
 		err = cmdBots(cfgPath, dirs, rest)
+	case "report":
+		err = cmdReport(cfgPath, rest)
 	case "customize":
 		err = cmdCustomize(dirs, rest)
 	case "help", "--help", "-h":
@@ -395,4 +401,40 @@ func splitFirst(args []string) (string, []string) {
 		return "", nil
 	}
 	return args[0], args[1:]
+}
+
+func cmdReport(cfgPath string, args []string) error {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	n := fs.Int("n", 1, "how many reports")
+	date := fs.String("date", "", "day (default: the latest)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	dir := cfg.Report.Directory()
+	file := filepath.Join(dir, *date+".txt")
+	if *date == "" {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.txt"))
+		if len(files) == 0 {
+			return fmt.Errorf("no reports yet in %s (one is written every report.every, 5m by default)", dir)
+		}
+		sort.Strings(files)
+		file = files[len(files)-1]
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(strings.TrimSpace(string(b)), "────────")
+	var out []string
+	for i := len(parts) - 1; i >= 0 && len(out) < *n; i-- {
+		if p := strings.TrimSpace(parts[i]); p != "" {
+			out = append([]string{p}, out...)
+		}
+	}
+	fmt.Println(strings.Join(out, "\n\n────────\n\n"))
+	return nil
 }

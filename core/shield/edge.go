@@ -26,7 +26,9 @@ type Gate struct {
 	ask    atomic.Bool // /check enforces; off = always allow
 	rec    *Recorder
 	header string
-	notify func(text string) // set when notifications are configured
+	send   func(title, text, level string) // makit notify, set by Serve
+
+	rep *Reporter // batch reports (report.go)
 
 	// Automatic bans take effect in memory at once; a writer persists them in batches (see banWriter).
 	banMu     sync.Mutex
@@ -84,7 +86,7 @@ func (l *guardListener) Accept() (net.Conn, error) {
 		}
 		if ok {
 			l.g.count("dropped")
-			l.g.rec.Write(Snapshot{Time: time.Now(), Listener: l.name, Decision: Decision{Client: addr.String(), Peer: addr.String(),
+			l.g.record(Snapshot{Time: time.Now(), Listener: l.name, Decision: Decision{Client: addr.String(), Peer: addr.String(),
 				Verdict: "dropped", Rule: e.Source, Reason: "connection closed: " + e.Prefix.String() + " " + e.Reason}})
 			c.Close()
 			continue
@@ -169,12 +171,12 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 				w.Header().Set("Retry-After", "60")
 				w.WriteHeader(d.Status)
 				_, _ = io.WriteString(w, limitedPage)
-				g.rec.Write(snap)
+				g.record(snap)
 				return
 			}
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, blockedPage)
-			g.rec.Write(snap)
+			g.record(snap)
 			return
 		}
 		// What the service behind sees: the resolved client IP, never a header a direct client tried to spoof.
@@ -188,7 +190,7 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		rp.ServeHTTP(sw, r)
 		snap.Status, snap.Ms = sw.code, time.Since(start).Milliseconds()
-		g.rec.Write(snap)
+		g.record(snap)
 	}), nil
 }
 
@@ -296,4 +298,10 @@ func tlsConfig(l Listener) (*tls.Config, error) {
 		return nil, errors.New("tls needs cert+key or acme domains")
 	}
 	return cfg, nil
+}
+
+// record writes the snapshot and counts it in the current batch report.
+func (g *Gate) record(s Snapshot) {
+	g.rec.Write(s)
+	g.rep.Observe(s)
 }

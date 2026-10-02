@@ -20,6 +20,9 @@ scoring:                     # request scoring (security/scoring/http.yaml) — 
   profiles: { wordpress: false, php: false }   # true when this server runs them: their paths are not suspicious
   # actions: { high: "ban 1h", critical: "ban 24h" }
   # file: /etc/makit/my-scoring.yaml           # or: makit shield customize scoring
+report:                      # batch report every 5 min → /var/log/makit/shield/reports, sent via makit notify
+  every: 5m
+  min_level: high            # send when the batch has high/critical traffic (bans and fake bots always)
 bots:                        # known bots, crawlers, AI agents — makit shield bots · makit docs bots
   policy: {}                 # e.g. { ai-crawler: block, gptbot: "limit 30/1m", seo: "ban 24h" }
 snapshot:
