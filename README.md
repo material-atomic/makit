@@ -20,8 +20,11 @@ updated with `makit rules update` and overridable per server. What the shield co
 Install (as root):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.5.0/install.sh | bash
+curl -fsSL https://makit.sh/install.sh | sh
 ```
+
+A given version: `curl -fsSL https://makit.sh/install.sh | sh -s -- v0.5.0` (or `https://makit.sh/v0.5.0/install.sh`).
+Website and guides: [makit.sh](https://makit.sh).
 
 Set up a new server — preview first, then apply:
 
@@ -180,12 +183,14 @@ Guide: [docs/security/notifications.md](docs/security/notifications.md).
 
 ## Verify before running
 
-Pin a version (never `main`) and, if you like, check the release tarball:
+`makit.sh/install.sh` only picks the version and runs that release's own `install.sh` from GitHub, which checks the
+source and the `makit-core` binary against the release's `SHA256SUMS` before installing. To read everything first,
+take the release's installer straight from GitHub (pinned to a tag, never `main`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.5.0/install.sh -o install.sh
 less install.sh
-MAKIT_SHA256=<sha256 from the release notes> bash install.sh
+bash install.sh
 ```
 
 The installer puts each version in `/opt/makit/<version>`, points `/opt/makit/current` at it and links
