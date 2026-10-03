@@ -1,0 +1,25 @@
+name: benchmark
+
+# benchmark/run.sh on a GitHub-hosted Linux runner (no Docker Desktop VM in the way): the report is attached to the
+# run as an artifact, to be committed to benchmark/results/. Started by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "arguments for benchmark/run.sh"
+        default: "all -c 32 -d 15s"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: benchmark/run.sh
+        run: benchmark/run.sh ${{ github.event.inputs.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark/results/*.md

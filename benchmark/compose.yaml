@@ -8,6 +8,11 @@ services:
     image: caddy:2-alpine
     volumes: ["./Caddyfile.proxy:/etc/caddy/Caddyfile:ro"]
     depends_on: [app, makit]
+  envoy:
+    image: envoyproxy/envoy:v1.39-latest
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes: ["./envoy.yaml:/etc/envoy/envoy.yaml:ro"]
+    depends_on: [app, makit]
   makit:
     image: caddy:2-alpine
     entrypoint: ["/bin/sh", "-c"]

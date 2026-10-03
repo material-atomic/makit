@@ -4,7 +4,7 @@
 #   benchmark/run.sh [micro|http|all] [-c CONNECTIONS] [-d DURATION] [--list N]
 #
 #   micro   Go benchmarks of each step of a decision (set lookups with 1M entries, scoring, bots, /check)
-#   http    end-to-end latency: the app alone vs. makit in front (edge), and Caddy alone vs. Caddy asking makit (ask)
+#   http    end-to-end latency: the app alone vs. makit in front (edge); Caddy and Envoy alone vs. asking makit (ask)
 #
 # The report goes to benchmark/results/<date>-<arch>-<cpus>cpu.md. Everything runs in containers of the
 # "makit-bench" compose project, on its own network, with no host ports; it is removed at the end.
@@ -101,15 +101,19 @@ if [[ $mode == http || $mode == all ]]; then
   cleanup
   rm -f "$here/.bin/http.jsonl"
   echo "▸ starting the stack (makit loads a $list-entry block list)…"
-  LIST_SIZE=$list "${compose[@]}" up -d app makit proxy >/dev/null
-  "${compose[@]}" run --rm load wait http://app:80/ http://makit:9180/status http://makit:8080/ http://proxy:81/ http://proxy:82/
+  LIST_SIZE=$list "${compose[@]}" up -d app makit proxy envoy >/dev/null
+  "${compose[@]}" run --rm load wait http://app:80/ http://makit:9180/status http://makit:8080/ http://proxy:81/ http://proxy:82/ \
+    http://envoy:83/ http://envoy:84/
   load() { "${compose[@]}" run --rm load run -out /bench/.bin/http.jsonl -c "$conc" -d "$dur" "$@" >/dev/null; }
   echo "▸ app directly"; load -name "app" -url http://app:80/
   echo "▸ makit edge → app"; load -name "makit edge → app" -baseline "app" -url http://makit:8080/
   echo "▸ Caddy → app"; load -name "Caddy → app" -url http://proxy:81/
   echo "▸ Caddy asking makit → app"; load -name "Caddy + makit ask → app" -baseline "Caddy → app" -url http://proxy:82/
+  echo "▸ Envoy → app"; load -name "Envoy → app" -url http://envoy:83/
+  echo "▸ Envoy ext_authz asking makit → app"; load -name "Envoy + makit ext_authz → app" -baseline "Envoy → app" -url http://envoy:84/
   echo "▸ attacks through makit edge"; load -name "makit edge, attack traffic" -profile attack -baseline "app" -url http://makit:8080/
   echo "▸ attacks through Caddy asking makit"; load -name "Caddy + makit ask, attack traffic" -profile attack -baseline "Caddy → app" -url http://proxy:82/
+  echo "▸ attacks through Envoy asking makit"; load -name "Envoy + makit ext_authz, attack traffic" -profile attack -baseline "Envoy → app" -url http://envoy:84/
   status=$("${compose[@]}" exec -T makit wget -qO- http://127.0.0.1:9180/status 2>/dev/null || echo '{}')
   {
     echo "## Request latency (HTTP, end to end)"

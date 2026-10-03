@@ -10,6 +10,9 @@ benchmark/run.sh micro         # only the Go benchmarks
 benchmark/run.sh http -c 64 -d 30s --list 5000000
 ```
 
+On GitHub: the `benchmark` workflow runs the same on a Linux runner and attaches the report (Actions → benchmark →
+Run workflow).
+
 The report is written to `results/<date>-<arch>-<cpus>cpu.md`. Run it on the kind of server you deploy to and send
 a pull request with that file: [`results/`](results/) collects them.
 
@@ -29,6 +32,11 @@ ranges, the bot score, and 100,000 distinct visitors so per-IP state is realisti
 | `Decide/undeclared-bot` | a script pretending to be Chrome: caught by the bot score |
 | `DecideParallel` | `Decide/browser` on every core at once |
 | `CheckEndpoint` | one Caddy `forward_auth` / nginx `auth_request` call, including writing the request snapshot |
+| `ClientIPChain` | the visitor read from a 3-hop `X-Forwarded-For` (Cloudflare → load balancer), right to left |
+| `DecideCluster/single`, `/cluster` | the same decisions alone and as a replica sharing limits and scores |
+| `LimiterShared/single`, `/cluster` | one rate-limit count, alone and keeping the delta for the other replicas |
+| `MetricsObserve` | counting one decision for `/metrics`, on 8 cores at once |
+| `ClusterBanPropagation` | a ban on one of 3 replicas until the 2 others enforce it (ms/ban, worst) |
 | `MatchMillion`, `BotIPIndex1M` | one lookup in a 1M-entry IP set (block list, bot IP index) |
 
 **Request latency** (`http`) — real HTTP through containers ([compose.yaml](compose.yaml)):
@@ -39,6 +47,9 @@ load ──► makit (edge) ──► app                 makit in front
 load ──► Caddy ──► app                        baseline for ask mode
 load ──► Caddy ──forward_auth──► makit
            └──► app                           ask mode
+load ──► Envoy ──► app                        baseline for a gateway
+load ──► Envoy ──ext_authz──► makit
+           └──► app                           what Envoy Gateway and Istio do
 ```
 
 The app is Caddy answering a fixed page, so only the proxy path is measured. makit runs in `block` mode with
