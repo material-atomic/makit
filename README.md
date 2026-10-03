@@ -262,6 +262,7 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 
 ## Roadmap
 
-v0.6 brought the shield to clusters behind cloud load balancers. Next is v0.7: bans pushed to more edges
-(Cloudflare Lists, Google Cloud Armor), more load balancer logs, and `makit scan` for pods and images. Everything
+v0.6 brought the shield to clusters behind cloud load balancers, and v0.7 made it read whatever stands in front. Next
+is v0.8: bans pushed to more edges (Cloudflare Lists, Google Cloud Armor), more load balancer logs, and `makit scan`
+for pods and images. Everything
 planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).

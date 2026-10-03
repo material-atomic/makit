@@ -9,6 +9,9 @@ tests/smoke.sh >/dev/null
 echo "$v" > VERSION
 perl -pi -e "s/MAKIT_VERSION:-v[0-9.]+/MAKIT_VERSION:-$tag/; s#makit/v[0-9.]+/install.sh#makit/$tag/install.sh#" install.sh
 perl -pi -e "s#makit/v[0-9.]+/install.sh#makit/$tag/install.sh#g; s#makit\.sh/v[0-9.]+/install.sh#makit.sh/$tag/install.sh#g; s#sh -s -- v[0-9.]+#sh -s -- $tag#g" README.md
+perl -pi -e "s/^version: .*/version: $v/; s/^appVersion: .*/appVersion: \"$v\"/" deploy/helm/makit-shield/Chart.yaml
+perl -pi -e "s#makit-shield:[0-9]+\.[0-9]+\.[0-9]+#makit-shield:$v#g" docs/security/kubernetes.md
+scripts/manifests.sh >/dev/null   # the plain manifests pin the image: the new version
 git commit -qam "release: $tag"
 git tag -a "$tag" -m "makit $tag"
 git push -q origin main "$tag"

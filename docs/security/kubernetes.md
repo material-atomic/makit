@@ -25,10 +25,10 @@ makit pods reach the cluster port. `shield.yaml` is `config:` in the values; it 
 Verify the image before you run it — every release is signed in GitHub Actions, without a long-lived key:
 
 ```bash
-cosign verify ghcr.io/material-atomic/makit-shield:0.6.0 \
+cosign verify ghcr.io/material-atomic/makit-shield:0.7.0 \
   --certificate-identity-regexp '^https://github.com/material-atomic/makit/.github/workflows/image.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-docker buildx imagetools inspect ghcr.io/material-atomic/makit-shield:0.6.0 --format '{{ json .SBOM }}'   # the SBOM
+docker buildx imagetools inspect ghcr.io/material-atomic/makit-shield:0.7.0 --format '{{ json .SBOM }}'   # the SBOM
 ```
 
 ## Make the gateway ask

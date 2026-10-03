@@ -13,9 +13,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 spec:
   podSelector:
     matchLabels:
@@ -39,9 +39,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 spec:
   minAvailable: 1
   selector:
@@ -57,9 +57,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 automountServiceAccountToken: false
 
 ---
@@ -70,9 +70,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 data:
   shield.yaml: |
     admin: 0.0.0.0:9180
@@ -96,9 +96,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 spec:
   type: ClusterIP
   selector:
@@ -116,9 +116,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 spec:
   clusterIP: None
   publishNotReadyAddresses: true   # a starting replica must reach the others to copy their bans
@@ -136,9 +136,9 @@ metadata:
   labels:
     app.kubernetes.io/name: makit-shield
     app.kubernetes.io/instance: makit
-    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/version: "0.7.0"
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: makit-shield-0.6.0
+    helm.sh/chart: makit-shield-0.7.0
 spec:
   replicas: 2
   selector:
@@ -172,7 +172,7 @@ spec:
               app.kubernetes.io/instance: makit
       containers:
         - name: shield
-          image: "ghcr.io/material-atomic/makit-shield:0.6.0"
+          image: "ghcr.io/material-atomic/makit-shield:0.7.0"
           imagePullPolicy: IfNotPresent
           args: [shield, serve]
           env:
