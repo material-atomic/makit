@@ -26,7 +26,7 @@ type Gate struct {
 	ask    atomic.Bool // /check enforces; off = always allow
 	rec    *Recorder
 	send   func(title, text, level string, channels []string) // makit notify, set by Serve
-	oldAsk sync.Once                                           // said once: a proxy still sends X-Makit-Peer
+	oldAsk sync.Once                                          // said once: a proxy still sends X-Makit-Peer
 
 	repMu  sync.Mutex
 	reps   map[string]*Reporter // batch reports per site ("" = global)

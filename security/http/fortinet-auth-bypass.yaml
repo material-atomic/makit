@@ -1,0 +1,13 @@
+# FortiOS / FortiProxy / FortiSwitchManager authentication bypass (CVE-2022-40684): the REST API trusts a request
+# whose User-Agent is "Report Runner" (with Forwarded: for=127.0.0.1) as its own reporting daemon. Only the exploit
+# sends that User-Agent to /api/v2/.
+id: MK-HTTP-FORTINET-AUTH
+title: Fortinet REST API authentication bypass (CVE-2022-40684)
+doc: docs/security/shield.md#rules
+refs: [CVE-2022-40684]
+ban_for: 168h
+match:
+  paths:
+    - '(?i)^/api/v2/'
+  user_agents:
+    - '^Report Runner$'

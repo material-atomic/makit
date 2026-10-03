@@ -62,6 +62,9 @@ http://app.example.com, http://admin.example.com {
 	import shield_on
 	respond "{host}: the visitor is {http.request.header.X-Makit-Client}" 200
 }
+http://echo.example.com {
+	respond "[{http.request.header.spring.cloud.function.routing-expression}]" 200
+}
 CADDY
 on 'docker rm -f origin-caddy >/dev/null 2>&1; docker network inspect web >/dev/null 2>&1 || docker network create web >/dev/null
     docker run -d --name origin-caddy --network web -p 80:80 -v /srv/origin/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine >/dev/null'
@@ -107,6 +110,34 @@ sleep 1
 code=$(visit admin.example.com 203.0.113.78 / "${googlebot[@]}")
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.3; code=$(visit admin.example.com 203.0.113.78 / "${googlebot[@]}"); [[ $code == 403 ]] && break; done
 [[ $code == 403 ]] && ok "once reverse DNS says it is not Google: blocked as spoofed ($(last_log | grep -o 'bot:spoofed' | head -1))" || fail "fake Googlebot after DNS: $code ($(last_log))"
+
+step "exploits carried in headers, through Cloudflare (as their public proofs of concept send them)"
+# replay NAME RULE CURL-ARGS…: on the blocking site, from a fresh address each time; the log must name RULE.
+n=60
+replay() {
+  local name=$1 rule=$2 code; shift 2; n=$((n + 1))
+  code=$(visit admin.example.com "203.0.113.$n" "$@")
+  [[ $code == 403 ]] && last_log | grep -q "$rule" && ok "$name: 403, $rule" || fail "$name: $code ($(last_log))"
+}
+replay "Next.js middleware bypass (CVE-2025-29927)" MK-HTTP-NEXT-MIDDLEWARE /dashboard -H 'x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware'
+replay "F5 BIG-IP iControl (CVE-2022-1388), token hop-by-hop" MK-HTTP-F5-ICONTROL /mgmt/tm/util/bash -X POST \
+  -H 'Connection: keep-alive, X-F5-Auth-Token' -H 'X-F5-Auth-Token: a' -H 'Content-Type: application/json' -d '{"command":"run"}'
+replay "Fortinet auth bypass (CVE-2022-40684)" MK-HTTP-FORTINET-AUTH /api/v2/cmdb/system/admin/admin -X PUT -A 'Report Runner' \
+  -H 'Forwarded: for="[127.0.0.1]:8000";by="[127.0.0.1]:9000";' -d '{}'
+replay "Struts OGNL in Content-Type (CVE-2017-5638)" MK-HTTP-STRUTS-OGNL /index.action \
+  -H "Content-Type: %{(#_='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#cmd='id')}"
+# A header name with dots: Caddy 2.11+ drops it on receipt (neither makit nor the app ever sees it), older proxies pass it.
+spel=(-X POST -H 'spring.cloud.function.routing-expression: T(java.lang.Runtime).getRuntime().exec("id")' -d x)
+if [[ $(curl -s -H 'Host: echo.example.com' -H 'X-Terrarium-Client-IP: 203.0.113.79' "${spel[@]}" "$edge/") == "[]" ]]; then
+  ok "Spring Cloud Function SpEL (CVE-2022-22963): this Caddy drops the header on receipt, the app never gets it"
+else
+  replay "Spring Cloud Function SpEL (CVE-2022-22963)" MK-HTTP-SPRING-CLOUD-FUNCTION /functionRouter "${spel[@]}"
+fi
+replay "Rails Accept traversal (CVE-2019-5418)" MK-HTTP-ACCEPT-TRAVERSAL /robots -H 'Accept: ../../../../../../../../etc/passwd{{'
+replay "X-Rewrite-URL (CVE-2018-14773)" MK-HTTP-REWRITE-URL / -H 'X-Rewrite-URL: /admin'
+replay "Shellshock (CVE-2014-6271)" shellshock /status -A '() { :; }; /bin/bash -c "id"'
+code=$(visit app.example.com 203.0.113.80 / "${browser[@]}" -H 'Sec-Purpose: prefetch;prerender' -H 'Priority: u=0, i' -H 'Sec-GPC: 1')
+[[ $code == 200 ]] && ok "a browser with today's headers (prefetch, priority, GPC) still passes" || fail "browser: $code ($(last_log))"
 
 step "skipping Cloudflare: straight to the origin with a forged CF-Connecting-IP and X-Forwarded-For"
 code=$(docker run --rm --network terrarium-internet curlimages/curl:8.10.1 -s -o /dev/null -w '%{http_code}' \

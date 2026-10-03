@@ -1,6 +1,16 @@
 # Changelog
 
 ## Unreleased
+- `makit shield` stops exploits carried in headers, each a catalog rule named by its CVE and replayed from its public
+  proof of concept: the Next.js middleware bypass (`x-middleware-subrequest`, CVE-2025-29927), Spring Cloud Function
+  SpEL (CVE-2022-22963), Struts OGNL in `Content-Type` (CVE-2017-5638), F5 BIG-IP iControl (CVE-2022-1388), Fortinet
+  (CVE-2022-40684), `../` in `Accept` (Rails CVE-2019-5418) and `X-Rewrite-URL` (Symfony CVE-2018-14773). Shellshock
+  in any header and a client's `X-Original-URL` are scored. Only headers no browser, crawler, CDN or load balancer
+  sends are named; real browser, CDN and API traffic is replayed beside them and passes. In ask mode, what the asking
+  proxy writes about the request (`X-Forwarded-Uri`, ingress-nginx's `X-Original-URL`…) is no longer matched as the
+  visitor's. The eleven rules cost what the four did: the URI is lower-cased once per request instead of once per
+  rule, rules are no longer copied per request, and a field's ASCII check is made once (Decide on a browser request
+  5.8 µs before and after; an attack 29 allocations instead of 30).
 - `makit shield` reads the visitor from the fields every proxy writes — `X-Forwarded-For`, else `Forwarded`, else
   `X-Real-IP` — walking back through `trusted_proxies`, whatever is in front: Cloudflare, CloudFront, Fastly, a
   DigitalOcean or AWS load balancer, or several. A provider's own header (`CF-Connecting-IP`) is no longer read:

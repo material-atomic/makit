@@ -27,7 +27,7 @@ type HTTPRule struct {
 		Headers    map[string]string `yaml:"headers"`
 	} `yaml:"match"`
 	paths, uas []*matcher
-	headers    map[string]*matcher
+	headers    []headerMatch // a slice, not a map: ranging over a map costs more than the lookups it drives
 	uaMemo     *memo[bool]
 }
 
@@ -55,19 +55,28 @@ func (r *HTTPRule) compile() error {
 	if len(r.uas) > 0 {
 		r.uaMemo = newMemo[bool]()
 	}
-	r.headers = map[string]*matcher{}
+	r.headers = nil
 	for h, p := range r.When.Headers {
 		re, err := compileMatcher(p)
 		if err != nil {
 			return err
 		}
-		r.headers[strings.ToLower(h)] = re
+		r.headers = append(r.headers, headerMatch{strings.ToLower(h), re})
 	}
+	sort.Slice(r.headers, func(i, j int) bool { return r.headers[i].name < r.headers[j].name })
 	return nil
 }
 
+type headerMatch struct {
+	name string
+	re   *matcher
+}
+
 func anyMatch(res []*matcher, s string) bool {
-	lower := strings.ToLower(s)
+	return anyMatchLower(res, s, strings.ToLower(s))
+}
+
+func anyMatchLower(res []*matcher, s, lower string) bool {
 	for _, re := range res {
 		if re.matchLower(s, lower) {
 			return true
@@ -77,6 +86,12 @@ func anyMatch(res []*matcher, s string) bool {
 }
 
 func (r *HTTPRule) Match(q Request) bool {
+	return r.match(q, "")
+}
+
+// match is Match with the URI already lower-cased for the literal prefilters ("" to lower it here): the rules of one
+// request share a single copy instead of making one each.
+func (r *HTTPRule) match(q Request, lowerURI string) bool {
 	if len(r.When.Methods) > 0 {
 		ok := false
 		for _, m := range r.When.Methods {
@@ -88,15 +103,20 @@ func (r *HTTPRule) Match(q Request) bool {
 			return false
 		}
 	}
-	if len(r.paths) > 0 && !anyMatch(r.paths, q.URI) {
-		return false
+	if len(r.paths) > 0 {
+		if lowerURI == "" {
+			lowerURI = strings.ToLower(q.URI)
+		}
+		if !anyMatchLower(r.paths, q.URI, lowerURI) {
+			return false
+		}
 	}
 	if len(r.uas) > 0 && !r.uaMemo.get(q.UA, func() bool { return anyMatch(r.uas, q.UA) }) {
 		return false
 	}
-	for h, re := range r.headers {
-		v, ok := q.Headers[h]
-		if !ok || !re.MatchString(v) {
+	for _, hm := range r.headers {
+		v, ok := q.Headers[hm.name]
+		if !ok || !hm.re.MatchString(v) {
 			return false
 		}
 	}

@@ -255,6 +255,7 @@ type scoredRequest struct {
 	val     [nFields]string
 	lowHave [nFields]bool
 	low     [nFields]string
+	ascii   [nFields]bool // with lowHave: the field is ASCII, so the literal prefilter may reject it
 	hdrLow  map[string]string
 }
 
@@ -340,9 +341,9 @@ func (q *scoredRequest) match(m *matcher, f fieldRef, v string) bool {
 		}
 	} else {
 		if !q.lowHave[f.id] {
-			q.low[f.id], q.lowHave[f.id] = strings.ToLower(v), true
+			q.low[f.id], q.ascii[f.id], q.lowHave[f.id] = strings.ToLower(v), isASCII(v), true
 		}
-		l = q.low[f.id]
+		return m.matchKnown(v, q.low[f.id], q.ascii[f.id])
 	}
 	return m.matchLower(v, l)
 }

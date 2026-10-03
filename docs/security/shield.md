@@ -198,6 +198,24 @@ client for `ban_for`:
 | MK-HTTP-TRAVERSAL | `../` and system-file requests (24h) |
 | MK-HTTP-SCANNER | sqlmap, nikto, nuclei, masscan… user agents (24h) |
 | MK-HTTP-R2S | Scripted `POST` with a `Next-Action` header — the React2Shell exploitation pattern (7 days) |
+| MK-HTTP-NEXT-MIDDLEWARE | `x-middleware-subrequest` from a client — the Next.js middleware bypass, CVE-2025-29927 (7 days) |
+| MK-HTTP-SPRING-CLOUD-FUNCTION | `spring.cloud.function.routing-expression` — SpEL injection, CVE-2022-22963 (7 days) |
+| MK-HTTP-STRUTS-OGNL | An OGNL expression in `Content-Type` — Apache Struts, CVE-2017-5638 (7 days) |
+| MK-HTTP-F5-ICONTROL | `/mgmt/tm/util/bash`, `/mgmt/shared/authn/login` — F5 BIG-IP, CVE-2022-1388 (7 days) |
+| MK-HTTP-FORTINET-AUTH | `User-Agent: Report Runner` on `/api/v2/` — Fortinet, CVE-2022-40684 (7 days) |
+| MK-HTTP-ACCEPT-TRAVERSAL | `../` in `Accept` — Rails file disclosure, CVE-2019-5418 (24h) |
+| MK-HTTP-REWRITE-URL | `X-Rewrite-URL` from a client — path override past access rules, Symfony CVE-2018-14773 (24h) |
+
+The header rules only name headers that browsers, crawlers, CDNs and load balancers never send, and each is replayed
+from its public proof of concept in the tests, next to real browser, CDN and API traffic that must pass
+(`go test ./shield -run Header`). Two header exploits are scored instead (see [Scoring](#scoring)): Shellshock
+(`() { :; };` at the start of any header, critical) and `X-Original-URL` (40: some gateways set it themselves). In ask
+mode, what the asking proxy writes about the request — `X-Forwarded-Uri`/`-Method`/`-Host`, ingress-nginx's
+`X-Original-URL` — is not the visitor's and is not matched. A Next.js middleware that `fetch()`es its own public URL
+sends `x-middleware-subrequest` too: call it by its internal address, or put the server's address in `allow:`.
+Caddy 2.11 and later drop a header whose name has a dot (`spring.cloud.function.routing-expression`) on receipt, so
+behind them that exploit never reaches makit or the app; Caddy 2.8, HAProxy and makit at the edge pass it, and the rule
+stops it.
 
 A server that hosts WordPress should override MK-HTTP-PROBE (copy it into your own catalog with `disabled: true` or
 without the WordPress paths) — see [the catalog](../../security/README.md).
@@ -217,7 +235,8 @@ matches, and each IP keeps a score over a window. The scoring set is part of the
   log analysis.
 
 Signals cover probes (`.env`, `.git`, cloud keys, backups, admin panels), path traversal, XSS in the URL (script
-tags, event handlers, `javascript:`/`data:` URLs, DOM sinks), SQL injection, Log4Shell, command injection, PHP
+tags, event handlers, `javascript:`/`data:` URLs, DOM sinks), SQL injection, Log4Shell and Shellshock (in any header),
+command injection, a client's `X-Original-URL`, PHP
 wrappers, scanner user agents, raw IP hosts, RDP or TLS spoken to an HTTP port, and the React2Shell pattern.
 
 Compared with the `nginx.score.json` it started from: one explicit model (signals add up, IPs keep a window)

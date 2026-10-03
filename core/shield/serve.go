@@ -220,6 +220,7 @@ func (g *Gate) checkHandler() http.Handler {
 			}
 		}
 		method, uri, host := askedRequest(r)
+		askOnly(hdr, h, uri)
 		q := Request{Peer: peer, Client: chain, Method: method, Host: host,
 			URI: uri, UA: h.Get("User-Agent"), Referer: h.Get("Referer"), Country: h.Get("CF-IPCountry"), Ray: h.Get("CF-Ray"),
 			Headers: hdr, Received: time.Now()}
@@ -331,6 +332,21 @@ func askedRequest(r *http.Request) (method, uri, host string) {
 		}
 	}
 	return method, uri, firstNonEmpty(host, r.Host)
+}
+
+// askOnly removes from the headers rules and scores read what the asking proxy wrote about the request (its method,
+// URI and host), which are not the visitor's. X-Original-URL is one of them when the proxy used it for the URI
+// (ingress-nginx) or it is the URI itself; otherwise the visitor sent it, and it stays to be judged.
+func askOnly(hdr map[string]string, h http.Header, uri string) {
+	for _, k := range []string{"x-forwarded-method", "x-forwarded-uri", "x-forwarded-host", "x-original-method", "x-original-uri"} {
+		delete(hdr, k)
+	}
+	if u := h.Get("X-Original-URL"); u != "" {
+		pu, err := url.Parse(u)
+		if err != nil || h.Get("X-Forwarded-Uri") == "" && h.Get("X-Original-URI") == "" || pu.RequestURI() == uri {
+			delete(hdr, "x-original-url")
+		}
+	}
 }
 
 // headerChain joins every line of a header in order ("a, b" and a second line "c" → "a, b, c"): a forwarding chain

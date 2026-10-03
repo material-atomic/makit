@@ -11,7 +11,9 @@ import (
 // askHeaders are the request headers makit reads; a gateway that sends only the headers it is told to must send these.
 var askHeaders = []string{"x-forwarded-for", "user-agent", "referer", "accept", "accept-encoding", "accept-language",
 	"sec-ch-ua", "sec-fetch-mode", "next-action", "signature", "signature-input", "signature-agent",
-	"forwarded", "x-real-ip", "cf-ipcountry", "cf-ray", "x-forwarded-proto"}
+	"forwarded", "x-real-ip", "cf-ipcountry", "cf-ray", "x-forwarded-proto",
+	// header exploits (security/http): a gateway that forwards only listed headers must forward these to catch them
+	"content-type", "x-middleware-subrequest", "x-rewrite-url", "x-original-url", "spring.cloud.function.routing-expression"}
 
 type snippetOpts struct {
 	addr, service, namespace, gateway, gatewayNS string

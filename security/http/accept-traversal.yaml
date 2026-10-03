@@ -1,0 +1,10 @@
+# Path traversal in the Accept header (Ruby on Rails CVE-2019-5418, file content disclosure: Accept:
+# ../../../../etc/passwd{{). Browsers send media types there, never a path.
+id: MK-HTTP-ACCEPT-TRAVERSAL
+title: Path traversal in the Accept header (Rails CVE-2019-5418)
+doc: docs/security/shield.md#rules
+refs: [CVE-2019-5418]
+ban_for: 24h
+match:
+  headers:
+    accept: '(\.\./|\.\.\\)'

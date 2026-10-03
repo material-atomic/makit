@@ -64,6 +64,7 @@ signals:
   - { id: sqli-boolean, field: query, match: '(?i)(''|")\s*\)?\s*(or|and)\s+(''|")?[\w-]*(''|")?\s*(=|like|<>|!=)\s*(''|")?[\w-]*|\b(or|and)\s+\d+\s*=\s*\d+\s*(--|#|/\*)', score: 70, label: "SQL injection (boolean)" }
   - { id: sqli-functions, field: query, match: '(?i)\b(sleep|benchmark|pg_sleep|waitfor\s+delay|extractvalue|updatexml|information_schema|load_file|into\s+outfile)\b', score: 70, label: "SQL injection (time/file functions)" }
   - { id: log4shell, field: any, match: '(?i)\$\{\s*(jndi|\$\{lower|env|sys|::-j)', score: 100, label: "Log4Shell" }
+  - { id: shellshock, field: any, match: '(?m)^\s*\(\)\s*\{[^}]*\}\s*;', score: 100, label: "Shellshock (CVE-2014-6271)" }   # () { :; }; in any header
   - { id: cmd-injection, field: query, match: '(;|\||&&|\$\(|`)\s*(wget|curl|nc|ncat|bash|sh|python[0-9]?|perl|chmod|nohup|busybox)\b', score: 80, label: "command injection" }
   - { id: cmd-download-run, field: query, match: '(?i)\b(wget|curl)\s+(-[a-z]+\s+)*https?://\S+.*\b(chmod|sh|bash|nohup)\b', score: 90, label: "download-and-run payload" }
   - { id: php-wrapper, field: query, match: '(?i)\b(php|phar|expect|zip|data)://', score: 60, label: "PHP stream wrapper" }
@@ -76,6 +77,9 @@ signals:
   - { id: ua-typo, field: ua, match: '(?i)mozila/', score: 70, label: "forged browser string" }                 # "Mozila" — forged browser string
   # --- request shape
   - { id: host-ip-literal, field: host, match: '^\[?[0-9a-f:.]+\]?(:\d+)?$', score: 30, label: "request to the bare IP" }   # scanners hit the IP, not your domain
+  # X-Original-URL makes IIS URL Rewrite, old Symfony/Laravel and some gateways route on another path than the one
+  # access rules checked. Only a score: a gateway in front may set it (makit ignores the copy an asking proxy uses).
+  - { id: path-override-header, field: header:x-original-url, match: '.+', score: 40, label: "path override header (X-Original-URL)" }
   - { id: r2s-server-action, field: header:next-action, match: '.+', score: 50, also: { field: ua, match: '(?i)^(python|curl|go-http|aiohttp|okhttp|wget)' }, label: "scripted Next.js Server Action (React2Shell)" }
   # --- log analysis only (needs the response status)
   - { id: status-probe, field: status, match: '^(400|403|404|405|444|499)$', score: 5, label: "error response" }

@@ -117,7 +117,13 @@ func (m *matcher) MatchString(s string) bool {
 
 // matchLower is MatchString when the caller already has strings.ToLower(s).
 func (m *matcher) matchLower(s, lower string) bool {
-	if m.lits != nil && isASCII(s) { // non-ASCII: case folding is not byte-wise, use the regexp
+	return m.matchKnown(s, lower, m.lits != nil && isASCII(s))
+}
+
+// matchKnown is matchLower when the caller already knows whether s is ASCII (a field matched by many signals is
+// scanned once, not once per signal).
+func (m *matcher) matchKnown(s, lower string, ascii bool) bool {
+	if m.lits != nil && ascii { // non-ASCII: case folding is not byte-wise, use the regexp
 		hit := false
 		for _, l := range m.lits {
 			if strings.Contains(lower, l) {

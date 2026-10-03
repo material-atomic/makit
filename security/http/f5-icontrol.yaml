@@ -1,0 +1,12 @@
+# F5 BIG-IP iControl REST authentication bypass (CVE-2022-1388): POST /mgmt/tm/util/bash with an X-F5-Auth-Token
+# listed in Connection, run as root. Scanners still send it to every web server. The header is hop-by-hop (named in
+# Connection), so a proxy in front drops it before asking makit: the rule matches the two endpoints, which only a
+# BIG-IP management interface serves.
+id: MK-HTTP-F5-ICONTROL
+title: F5 BIG-IP iControl REST exploit (CVE-2022-1388)
+doc: docs/security/shield.md#rules
+refs: [CVE-2022-1388]
+ban_for: 168h
+match:
+  paths:
+    - '(?i)^/mgmt/(tm/util/bash|shared/authn/login)'

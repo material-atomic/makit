@@ -1,0 +1,14 @@
+# Next.js middleware authorization bypass (CVE-2025-29927, fixed in 12.3.5, 13.5.9, 14.2.25 and 15.2.3). Next.js
+# marks its own middleware sub-requests with x-middleware-subrequest and skips the middleware for them: a client
+# that sends the header itself — "middleware", "src/middleware", "pages/_middleware" or the name repeated five times
+# — walks past whatever the middleware guards (logins, admin pages, paywalls). Browsers, crawlers and CDNs never send
+# it. One exception: a middleware that fetch()es its own public URL sends it too — call such pages by their internal
+# address, or put the server's address in allow:.
+id: MK-HTTP-NEXT-MIDDLEWARE
+title: Next.js middleware bypass header (CVE-2025-29927)
+doc: docs/security/shield.md#rules
+refs: [CVE-2025-29927]
+ban_for: 168h
+match:
+  headers:
+    x-middleware-subrequest: '.*'

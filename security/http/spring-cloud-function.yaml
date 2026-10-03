@@ -1,0 +1,11 @@
+# Spring Cloud Function SpEL injection (CVE-2022-22963): the routing header is evaluated as a Spring expression, so
+# T(java.lang.Runtime).getRuntime().exec(…) runs a command. The header is an internal routing hint; no browser,
+# crawler or CDN sends it.
+id: MK-HTTP-SPRING-CLOUD-FUNCTION
+title: Spring Cloud Function routing-expression header (CVE-2022-22963)
+doc: docs/security/shield.md#rules
+refs: [CVE-2022-22963]
+ban_for: 168h
+match:
+  headers:
+    spring.cloud.function.routing-expression: '.*'

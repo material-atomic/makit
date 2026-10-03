@@ -1,0 +1,11 @@
+# X-Rewrite-URL overrides the path a framework routes on (Symfony before 2.7.49 / 3.4.14 / 4.1.3, CVE-2018-14773; old
+# Zend Framework): access rules checked on the real path are then skipped. Only IIS-era rewriting modules set it, on
+# the server side; from a client it is an access-control bypass attempt.
+id: MK-HTTP-REWRITE-URL
+title: X-Rewrite-URL path override (Symfony CVE-2018-14773)
+doc: docs/security/shield.md#rules
+refs: [CVE-2018-14773]
+ban_for: 24h
+match:
+  headers:
+    x-rewrite-url: '.*'

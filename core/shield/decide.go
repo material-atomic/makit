@@ -312,8 +312,13 @@ func (p *Policy) decide(r Request) Decision {
 			}
 		}
 	}
-	for _, rule := range p.Rules {
-		if rule.Match(r) {
+	lowerURI := ""
+	if len(p.Rules) > 0 {
+		lowerURI = strings.ToLower(r.URI)
+	}
+	for i := range p.Rules {
+		rule := &p.Rules[i] // not a copy: a rule is a few hundred bytes, copied per rule per request
+		if rule.match(r, lowerURI) {
 			if rule.BanFor > 0 && p.Ban != nil && !p.Observe && !p.trusted(client) {
 				p.Ban(client, rule.BanFor, "rule:"+rule.ID, rule.Title, p.Site, p.SiteScoped)
 			}

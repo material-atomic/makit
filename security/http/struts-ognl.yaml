@@ -1,0 +1,11 @@
+# Apache Struts 2 Jakarta multipart parser RCE (CVE-2017-5638, S2-045): an OGNL expression in Content-Type is
+# evaluated in the error message. Still among the most scanned exploits. A real Content-Type never holds %{ or ${
+# with OGNL in it.
+id: MK-HTTP-STRUTS-OGNL
+title: OGNL expression in Content-Type (Apache Struts CVE-2017-5638)
+doc: docs/security/shield.md#rules
+refs: [CVE-2017-5638]
+ban_for: 168h
+match:
+  headers:
+    content-type: '(?i)[%$]\{.*(ognl|_memberaccess|@java\.lang|#context|#cmd|#_=)'
