@@ -1,0 +1,5 @@
+# Only core/ and security/ go into the makit-shield image.
+*
+!core/
+!security/
+core/shield.test

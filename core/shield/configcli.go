@@ -48,7 +48,7 @@ func cmdConfig(cfgPath string, dirs []string, args []string) error {
 	if err != nil {
 		return err
 	}
-	opt := CheckOptions{Dirs: dirs, Files: true}
+	opt := CheckOptions{Dirs: dirs, Files: true, InPod: os.Getenv("KUBERNETES_SERVICE_HOST") != ""}
 	if nc, err := notify.Load(firstNonEmpty(os.Getenv("MAKIT_NOTIFY_CONFIG"), notify.DefaultConfig)); err == nil {
 		opt.Channels = []string{}
 		for _, ch := range nc.Channels {

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: makit-shield
+description: makit request shield for Kubernetes — gateways ask it before every request; replicas share bans, limits and scores.
+type: application
+version: 0.6.0
+appVersion: "0.6.0"
+home: https://makit.sh
+sources: [https://github.com/material-atomic/makit]
+keywords: [security, waf, bot-management, rate-limiting, ext-authz, gateway-api]
+icon: https://raw.githubusercontent.com/material-atomic/makit/main/brand/logo-mark.svg
+annotations:
+  licenses: MIT

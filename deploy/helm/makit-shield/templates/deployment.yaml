@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "makit.fullname" . }}
+  labels: {{- include "makit.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "makit.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "makit.selector" . | nindent 8 }}
+      annotations:
+        # cluster: is read at start: a change restarts the pods. The rest of shield.yaml is reloaded live.
+        checksum/cluster: {{ toJson .Values.cluster | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "makit.selector" . | nindent 14 }}
+      containers:
+        - name: shield
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [shield, serve]
+          env:
+            # The ConfigMap is mounted as a directory (not subPath) so edits reach the running pods.
+            - { name: MAKIT_SHIELD_CONFIG, value: /etc/makit/live/shield.yaml }
+            {{- if .Values.notify.existingSecret }}
+            - { name: MAKIT_NOTIFY_CONFIG, value: /etc/makit/notify/notify.yaml }
+            {{- end }}
+            {{- if .Values.cluster.enabled }}
+            - name: MAKIT_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "makit.clusterSecret" . }}, key: secret }
+            {{- end }}
+          ports:
+            - { name: admin, containerPort: 9180 }
+            {{- if .Values.cluster.enabled }}
+            - { name: cluster, containerPort: {{ .Values.cluster.port }} }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/makit/live, readOnly: true }
+            - { name: state, mountPath: /var/lib/makit }
+            - { name: logs, mountPath: /var/log/makit }
+            {{- if .Values.notify.existingSecret }}
+            - { name: notify, mountPath: /etc/makit/notify, readOnly: true }
+            {{- end }}
+            {{- if .Values.catalog.existingConfigMap }}
+            - { name: catalog, mountPath: /etc/makit/security, readOnly: true }
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "makit.fullname" . }} }
+        - name: state
+          emptyDir: {}
+        - name: logs
+          emptyDir: { sizeLimit: 1Gi }
+        {{- if .Values.notify.existingSecret }}
+        - name: notify
+          secret: { secretName: {{ .Values.notify.existingSecret }} }
+        {{- end }}
+        {{- if .Values.catalog.existingConfigMap }}
+        - name: catalog
+          configMap: { name: {{ .Values.catalog.existingConfigMap }} }
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

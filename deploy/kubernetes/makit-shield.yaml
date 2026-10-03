@@ -1,0 +1,201 @@
+# makit-shield, plain manifests (rendered from deploy/helm/makit-shield with defaults; namespace makit).
+# First: kubectl create namespace makit
+#        kubectl -n makit create secret generic makit-shield-cluster --from-literal=secret=$(openssl rand -hex 32)
+# Then:  kubectl apply -n makit -f makit-shield.yaml
+# Regenerate: scripts/manifests.sh
+---
+# The cluster port carries ban lists: only makit pods may reach it. /check and /metrics (admin) stay reachable inside
+# the cluster for gateways, kubelet probes and Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: makit-shield
+      app.kubernetes.io/instance: makit
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{ port: admin }]
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: makit-shield
+              app.kubernetes.io/instance: makit
+      ports: [{ port: cluster }]
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: makit-shield
+      app.kubernetes.io/instance: makit
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+data:
+  shield.yaml: |
+    admin: 0.0.0.0:9180
+    ask: true
+    client_ip_header: X-Forwarded-For
+    cluster:
+      listen: :9181
+      peers:
+      - dns:makit-makit-shield-headless.makit.svc.cluster.local:9181
+      sync: 1s
+    mode: observe
+    report:
+      every: 5m
+    trusted_proxies:
+    - vpc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+  ports:
+    - { name: admin, port: 9180, targetPort: admin }
+
+---
+# Every replica's address, for the others to find (cluster.peers: dns:…).
+apiVersion: v1
+kind: Service
+metadata:
+  name: makit-makit-shield-headless
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true   # a starting replica must reach the others to copy their bans
+  selector:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+  ports:
+    - { name: cluster, port: 9181, targetPort: cluster }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: makit-shield
+      app.kubernetes.io/instance: makit
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: makit-shield
+        app.kubernetes.io/instance: makit
+      annotations:
+        # cluster: is read at start: a change restarts the pods. The rest of shield.yaml is reloaded live.
+        checksum/cluster: 94650e2c48ac8695
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: makit-shield
+              app.kubernetes.io/instance: makit
+      containers:
+        - name: shield
+          image: "ghcr.io/material-atomic/makit-shield:0.6.0"
+          imagePullPolicy: IfNotPresent
+          args: [shield, serve]
+          env:
+            # The ConfigMap is mounted as a directory (not subPath) so edits reach the running pods.
+            - { name: MAKIT_SHIELD_CONFIG, value: /etc/makit/live/shield.yaml }
+            - name: MAKIT_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef: { name: makit-shield-cluster, key: secret }
+          ports:
+            - { name: admin, containerPort: 9180 }
+            - { name: cluster, containerPort: 9181 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - { name: config, mountPath: /etc/makit/live, readOnly: true }
+            - { name: state, mountPath: /var/lib/makit }
+            - { name: logs, mountPath: /var/log/makit }
+      volumes:
+        - name: config
+          configMap: { name: makit-makit-shield }
+        - name: state
+          emptyDir: {}
+        - name: logs
+          emptyDir: { sizeLimit: 1Gi }

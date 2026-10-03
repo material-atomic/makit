@@ -381,7 +381,7 @@ func Serve(cfgPath string, dirs []string) error {
 		}
 		// What loads but probably does not do what was meant (a misspelt key is ignored): said in the log.
 		if b, err := os.ReadFile(cfgPath); err == nil {
-			for _, i := range CheckConfig(b, CheckOptions{}) {
+			for _, i := range CheckConfig(b, CheckOptions{InPod: os.Getenv("KUBERNETES_SERVICE_HOST") != ""}) {
 				log.Printf("shield: config %s: %s (makit shield config check)", i.Level, i)
 			}
 		}

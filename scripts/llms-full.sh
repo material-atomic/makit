@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 raw=https://raw.githubusercontent.com/material-atomic/makit/main
 blob=https://github.com/material-atomic/makit/blob/main
-guides=(shield bots notifications malware persistence dependencies scheduled-scans incident-response ssh firewall
+guides=(shield kubernetes bots notifications malware persistence dependencies scheduled-scans incident-response ssh firewall
   docker-ports egress containers updates kernel mounts fail2ban apparmor secrets logging accounts backups)
 
 # absolutize FILE: rewrites ](relative) links against FILE's directory — Markdown to raw files, the rest to GitHub.

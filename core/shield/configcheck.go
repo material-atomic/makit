@@ -43,6 +43,7 @@ type CheckOptions struct {
 	Dirs     []string // catalog directories: rules, scoring and bots are loaded and checked against them (nil: skipped)
 	Files    bool     // the file is on the server it configures: certificate files must exist
 	Channels []string // makit notify channel names (nil: not checked)
+	InPod    bool     // running in a Kubernetes pod: listening on every address is the norm there
 }
 
 // CheckConfig checks shield.yaml given as bytes and returns its issues, errors first, in line order.
@@ -326,7 +327,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 	}
 	if host, _, err := net.SplitHostPort(cfg.Admin); err != nil {
 		c.add("error", c.line("admin"), "admin", fmt.Sprintf("admin %q must be host:port, e.g. 127.0.0.1:9180", cfg.Admin))
-	} else if a, err := netip.ParseAddr(host); host == "" || (err == nil && !a.IsLoopback() && !a.IsPrivate()) {
+	} else if a, err := netip.ParseAddr(host); !opt.InPod && (host == "" || (err == nil && !a.IsLoopback() && !a.IsPrivate())) {
 		c.add("warning", c.line("admin"), "admin",
 			fmt.Sprintf("admin %s listens on public addresses: fine in a Kubernetes pod (private network), but on a server with a public IP keep it on 127.0.0.1 or a private address — /check, /status and /metrics answer only private callers, still", cfg.Admin))
 	}

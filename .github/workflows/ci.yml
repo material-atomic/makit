@@ -52,6 +52,21 @@ jobs:
       - name: replay a React2Shell-style compromise and check every finding
         run: tests/scan-e2e.sh
 
+  # makit-shield in a real Kubernetes cluster: the Helm chart with 3 replicas; bans, live config and rate limits
+  # shared across them, checked from a pod.
+  k8s:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - uses: azure/setup-helm@v4
+      - name: helm lint, then tests/k8s-e2e.sh
+        run: |
+          helm lint deploy/helm/makit-shield
+          tests/k8s-e2e.sh
+
   # Real VMs: run makit init for real, twice (idempotency), then verify every managed part is in place.
   vm:
     strategy:

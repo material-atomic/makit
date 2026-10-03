@@ -39,6 +39,15 @@
   forwardAuth, ingress-nginx auth-url), passing every header makit reads. `/check` understands Envoy's
   `/check/<path>` and ingress-nginx's `X-Original-URL`. `/status` and `/metrics` answer only private callers, like
   `/check`.
+- makit in Kubernetes: the `makit-shield` image (20 MB, distroless, non-root, read-only root filesystem; amd64 and
+  arm64; signed keyless with cosign, SBOM and provenance attached; chart pushed to `oci://ghcr.io/material-atomic/charts`),
+  the Helm chart `deploy/helm/makit-shield` (2+ replicas sharing one shield, cluster secret generated once and kept,
+  headless Service for peers, PodDisruptionBudget, NetworkPolicy on the cluster port, optional ServiceMonitor,
+  `/readyz` and `/healthz` probes) and plain manifests `deploy/kubernetes/makit-shield.yaml`. `shield.yaml` comes from a
+  ConfigMap mounted as a directory, so `helm upgrade` applies it live without restarting pods. New guide: Kubernetes
+  and cloud load balancers (`makit docs kubernetes`). `tests/k8s-e2e.sh` checks it on kind: 3 replicas, CLI and
+  automatic bans enforced everywhere, live config, `limit 10/1m` letting 11 of 30 requests through across replicas
+  (27 with `cluster:` off).
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

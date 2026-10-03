@@ -1,0 +1,8 @@
+makit-shield is running ({{ .Values.replicaCount }} replicas, mode {{ .Values.config.mode }}).
+
+Make your gateway ask it before every request:
+  makit shield snippet envoy-gateway --service {{ include "makit.fullname" . }} --namespace {{ .Release.Namespace }} --gateway <name> --gateway-namespace <ns>
+  (or: istio, envoy, traefik, ingress-nginx)
+
+Status of one replica:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "makit.fullname" . }} -- makit-core shield status

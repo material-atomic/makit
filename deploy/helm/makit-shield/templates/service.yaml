@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "makit.fullname" . }}
+  labels: {{- include "makit.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "makit.selector" . | nindent 4 }}
+  ports:
+    - { name: admin, port: {{ .Values.service.port }}, targetPort: admin }
+{{- if .Values.cluster.enabled }}
+---
+# Every replica's address, for the others to find (cluster.peers: dns:…).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "makit.fullname" . }}-headless
+  labels: {{- include "makit.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true   # a starting replica must reach the others to copy their bans
+  selector: {{- include "makit.selector" . | nindent 4 }}
+  ports:
+    - { name: cluster, port: {{ .Values.cluster.port }}, targetPort: cluster }
+{{- end }}
