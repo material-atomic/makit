@@ -183,7 +183,7 @@ function botsBlock() {
   const changed = Object.keys(pol).length;
   return block('bots', 'Bots and AI agents', changed ? `${changed} policies` : 'catalog defaults',
     el('div', { class: 'cats' }, cats.map(([k, c]) => row(k, c.label, c.action)), row('spoofed', 'pretends to be a verifiable bot', catalog.spoofed || 'block')),
-    el('p', { class: 'note' }, 'limit N/window is per IP (429 when over). Verified search engines and assistants pass; fake ones are caught by IP ranges or reverse DNS. Per bot: makit shield bots set <id> …'));
+    el('p', { class: 'note' }, 'limit N/window counts all of an agent\'s IPs together — GPTBot crawls from many (429 when over). Verified search engines and assistants pass; fake ones are caught by IP ranges or reverse DNS. Per bot: makit shield bots set <id> …'));
 }
 
 function scoringBlock() {
