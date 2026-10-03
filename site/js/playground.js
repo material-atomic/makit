@@ -202,7 +202,7 @@ function scoringBlock() {
       s.value = acts[l] || '';
       return el('label', {}, `${l} (score ≥ ${sc.thresholds[l]})`, s);
     })),
-    el('p', { class: 'note' }, `Probes, XSS, SQL injection, Log4Shell, command injection, raw requests and floods — ${(sc.signals || []).length} signals in the catalog.`));
+    el('p', { class: 'note' }, `Probes, XSS, SQL injection, Log4Shell, Shellshock, command injection, raw requests and floods — ${(sc.signals || []).length} signals in the catalog.`));
 }
 
 function sitesBlock() {
