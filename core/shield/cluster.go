@@ -105,7 +105,7 @@ type Cluster struct {
 	known    map[string]Entry     // block/allow entries at the last state load, to see what the CLI changed
 	remote   map[string]time.Time
 	baseline bool
-	pulled   bool // the bans of a running replica are copied (or there was none to copy from)
+	pulled   bool          // the bans of a running replica are copied (or there was none to copy from)
 	kick     chan struct{} // a list change: send it now instead of at the next sync
 	recvd    atomic.Uint64
 	refused  atomic.Uint64
