@@ -552,7 +552,7 @@ func Serve(cfgPath string, dirs []string) error {
 	}
 	feeds := time.NewTicker(5 * time.Minute)
 	hup := make(chan os.Signal, 1)
-	signal.Notify(hup, syscall.SIGHUP)
+	signal.Notify(hup, reloadSignal)
 	go func() {
 		var last, lastCfg time.Time
 		if st, err := os.Stat(statePath()); err == nil {

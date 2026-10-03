@@ -28,3 +28,5 @@ Source tarball and makit-core binaries: \`SHA256SUMS\` (verified by install.sh).
 echo "released $tag"
 echo "next: on the website (RunSnip project makit.sh) add $tag/install.sh (a pinned copy of the previous one) and"
 echo "      replace llms-full.txt with the output of scripts/llms-full.sh"
+echo "      upload site/playground.html, site/js/playground.js and site/css/playground.css (the WebAssembly is published"
+echo "      on the playground branch by .github/workflows/playground.yml)"

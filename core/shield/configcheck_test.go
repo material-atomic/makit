@@ -160,3 +160,14 @@ func TestReplay(t *testing.T) {
 		t.Errorf("a blocked browser answered 200 must be a likely false positive: %+v", r)
 	}
 }
+
+func TestConfigCheckAwayAndInPod(t *testing.T) {
+	t.Setenv("MAKIT_CLUSTER_SECRET", "")
+	cfg := []byte("admin: 0.0.0.0:9180\ncluster: { listen: \":9181\", peers: [\"dns:x.y.svc:9181\"] }\n")
+	if got := issuesText(CheckConfig(cfg, CheckOptions{})); !strings.Contains(got, "shared secret") || !strings.Contains(got, "public addresses") {
+		t.Errorf("on a server both warnings apply:\n%s", got)
+	}
+	if got := CheckConfig(cfg, CheckOptions{Away: true, InPod: true}); len(got) != 0 {
+		t.Errorf("in the playground, for pods: %s", issuesText(got))
+	}
+}

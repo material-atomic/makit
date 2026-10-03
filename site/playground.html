@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Config playground — makit</title>
+  <meta name="description" content="Build shield.yaml and notify.yaml for makit in the browser, checked by makit's own config check. Nothing leaves your browser.">
+  <meta property="og:title" content="Config playground — makit">
+  <meta property="og:description" content="Build and check makit's shield.yaml and notify.yaml in the browser.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/material-atomic/makit/main/brand/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/playground.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="index.html"><img src="img/logo-mark.svg" width="24" height="24" alt="">makit</a>
+      <nav>
+        <a href="docs.html">Docs</a>
+        <a href="docs.html?p=shield">Shield</a>
+        <a href="playground.html" class="on">Playground</a>
+        <a href="docs.html?p=roadmap">Roadmap</a>
+        <a href="https://github.com/material-atomic/makit">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="pg wrap">
+    <div class="pg-head">
+      <h1>Config playground</h1>
+      <p class="sub">Start from a preset, add blocks, and watch <code>shield.yaml</code> take shape. Every change is checked by
+        makit's own <code>config check</code>, compiled to WebAssembly with the bundled catalog — the same messages as
+        <code>makit shield config check</code> on your server. <b>Nothing leaves your browser</b>; secrets stay placeholders
+        unless you type them.</p>
+      <div class="tabs" role="tablist">
+        <button class="tab on" data-tab="shield" role="tab">shield.yaml</button>
+        <button class="tab" data-tab="notify" role="tab">notify.yaml</button>
+      </div>
+    </div>
+
+    <div class="pg-grid" id="tab-shield">
+      <div class="pg-build">
+        <div class="presets" id="presets"></div>
+        <div id="blocks"></div>
+      </div>
+      <div class="pg-out">
+        <div class="status" id="status"><span class="dot"></span><span id="status-text">Loading makit's config check…</span></div>
+        <ul class="issues" id="issues"></ul>
+        <div class="editor">
+          <div class="editor-bar"><span>shield.yaml</span><span class="hint">edit here too — the blocks follow</span></div>
+          <textarea id="yaml" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="shield.yaml"></textarea>
+        </div>
+        <div class="export">
+          <button class="btn primary" data-export="file">Download shield.yaml</button>
+          <button class="btn" data-export="configmap">Kubernetes ConfigMap</button>
+          <button class="btn" data-export="helm">Helm values</button>
+          <button class="btn" data-export="copy">Copy</button>
+        </div>
+        <p class="note">On the server: copy it to <code>/etc/makit/shield.yaml</code>, or check a file first with
+          <code>makit shield config check FILE --replay /var/log/nginx/access.log</code> to see what it would change on real
+          traffic.</p>
+      </div>
+    </div>
+
+    <div class="pg-grid" id="tab-notify" hidden>
+      <div class="pg-build">
+        <div class="block open">
+          <h3>Add a channel</h3>
+          <div class="row">
+            <label>Type <select id="ch-type"></select></label>
+            <label>Name <input id="ch-name" placeholder="ops"></label>
+            <label>Minimum level <select id="ch-level"><option>info</option><option>low</option><option>medium</option><option selected>high</option><option>critical</option></select></label>
+          </div>
+          <div class="row" id="ch-fields"></div>
+          <button class="btn primary" id="ch-add">Add channel</button>
+          <p class="note">Secrets (tokens, webhook URLs, passwords) stay <code>&lt;placeholders&gt;</code> unless you type them, and
+            are never sent anywhere. Or leave them out here and run <code>makit notify add …</code> on the server.</p>
+        </div>
+        <div id="channels"></div>
+      </div>
+      <div class="pg-out">
+        <div class="editor">
+          <div class="editor-bar"><span>notify.yaml</span><span class="hint">/etc/makit/notify.yaml</span></div>
+          <textarea id="notify-yaml" spellcheck="false" readonly aria-label="notify.yaml"></textarea>
+        </div>
+        <div class="export">
+          <button class="btn primary" data-nexport="file">Download notify.yaml</button>
+          <button class="btn" data-nexport="secret">Kubernetes Secret</button>
+          <button class="btn" data-nexport="copy">Copy</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>makit · MIT</span>
+      <a href="https://github.com/material-atomic/makit">GitHub</a>
+      <a href="docs.html?p=shield">Shield guide</a>
+      <a href="docs.html?p=kubernetes">Kubernetes guide</a>
+      <a class="sp" href="mailto:hello@makit.sh">hello@makit.sh</a>
+    </div>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/playground.js"></script>
+</body>
+</html>

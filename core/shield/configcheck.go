@@ -44,6 +44,7 @@ type CheckOptions struct {
 	Files    bool     // the file is on the server it configures: certificate files must exist
 	Channels []string // makit notify channel names (nil: not checked)
 	InPod    bool     // running in a Kubernetes pod: listening on every address is the norm there
+	Away     bool     // checked away from the server (the playground): secrets from its environment are not looked for
 }
 
 // CheckConfig checks shield.yaml given as bytes and returns its issues, errors first, in line order.
@@ -342,7 +343,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 		c.add("error", c.line("ban_scope"), "ban_scope", "ban_scope must be server or site")
 	}
 	c.listeners(cfg, opt, len(trusted) > 0)
-	c.cluster(cfg.Cluster)
+	c.cluster(cfg.Cluster, opt.Away)
 	c.awsWAF(cfg.AWSWAF)
 	c.report(cfg.Report.Every, cfg.Report.MinLevel, "report")
 	if opt.Channels != nil {
@@ -390,7 +391,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 	}
 }
 
-func (c *checker) cluster(cl ClusterConfig) {
+func (c *checker) cluster(cl ClusterConfig, away bool) {
 	if cl.Listen == "" && len(cl.Peers) == 0 {
 		return
 	}
@@ -413,7 +414,7 @@ func (c *checker) cluster(cl ClusterConfig) {
 			c.add("error", c.line("cluster", "sync"), "sync", fmt.Sprintf("cluster sync %q: a duration of 100ms or more", cl.Sync))
 		}
 	}
-	if _, err := cl.secret(); err != nil {
+	if _, err := cl.secret(); err != nil && !away {
 		c.add("warning", c.line("cluster"), "cluster", err.Error()+" — the gate will not start without it")
 	}
 }

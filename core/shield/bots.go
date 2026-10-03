@@ -118,7 +118,7 @@ func LoadBotsConfig(dirs []string, cfg BotsConfig) (*BotCatalog, error) {
 	}
 	var bc *BotCatalog
 	for _, f := range paths {
-		b, err := os.ReadFile(f)
+		b, err := readCatalog(f)
 		if err != nil {
 			continue
 		}

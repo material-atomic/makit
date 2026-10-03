@@ -2,7 +2,6 @@ package shield
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -108,10 +107,10 @@ func (r *HTTPRule) Match(q Request) bool {
 func LoadHTTPRules(dirs []string) ([]HTTPRule, error) {
 	byID := map[string]HTTPRule{}
 	for _, d := range dirs {
-		files, _ := filepath.Glob(filepath.Join(d, "http", "*.yaml"))
+		files, _ := globCatalog(filepath.Join(d, "http", "*.yaml"))
 		sort.Strings(files)
 		for _, f := range files {
-			b, err := os.ReadFile(f)
+			b, err := readCatalog(f)
 			if err != nil {
 				return nil, err
 			}

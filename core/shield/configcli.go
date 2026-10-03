@@ -56,6 +56,9 @@ func cmdConfig(cfgPath string, dirs []string, args []string) error {
 		}
 	}
 	issues := CheckConfig(b, opt)
+	if issues == nil {
+		issues = []Issue{} // --json: [] rather than null
+	}
 	errs := 0
 	for _, i := range issues {
 		if i.Level == "error" {

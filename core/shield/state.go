@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -28,7 +27,7 @@ func withState(fn func(*State) error) (*State, error) {
 		return nil, err
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(lock); err != nil {
 		return nil, err
 	}
 	st, err := LoadState()

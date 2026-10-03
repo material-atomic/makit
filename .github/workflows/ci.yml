@@ -32,6 +32,19 @@ jobs:
           go vet ./...
           go test ./...
 
+  # The config playground on makit.sh: makit's config check in WebAssembly answers like the CLI.
+  playground:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: tests/playground.sh ci
+
   smoke:
     runs-on: ubuntu-24.04
     steps:

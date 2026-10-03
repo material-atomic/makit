@@ -57,6 +57,11 @@
   than /8 / /32; beyond 10,000 addresses the newest bans win. Credentials from the AWS chain (EKS Pod Identity, IRSA,
   instance role); the chart has a ServiceAccount to annotate.
 - Cluster sync every 250 ms by default (was 1 s): between two syncs a limit can be exceeded by about rate × interval.
+- Config playground on makit.sh (`playground.html`): presets (single site, many domains, behind Cloudflare, behind a load
+  balancer in Kubernetes, makit in front), blocks for every part of `shield.yaml` and a builder for `notify.yaml`, the
+  YAML editable both ways, exports as a file, a ConfigMap, Helm values or a Secret. Checked by makit's own config
+  check compiled to WebAssembly with the bundled catalog (~14 ms a check), so the messages are the CLI's; nothing
+  leaves the browser and secrets stay placeholders. `tests/playground.sh` checks the WebAssembly in CI.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

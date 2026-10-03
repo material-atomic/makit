@@ -1,0 +1,43 @@
+name: playground
+
+# The config playground's WebAssembly for makit.sh: built from the release tag and published on the "playground"
+# branch, which the page loads through jsDelivr (cdn.jsdelivr.net/gh/<repo>@playground/…, CORS and compression).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: build and check
+        run: tests/playground.sh "${GITHUB_REF_NAME#v}"
+      - name: publish on the playground branch
+        run: |
+          cd dist/playground
+          rm -f makit-check.wasm.gz
+          cat > README.md <<MD
+          Built by .github/workflows/playground.yml from ${GITHUB_REF_NAME} (${GITHUB_SHA}) for https://makit.sh/playground.html.
+          MD
+          git init -q -b playground
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "playground ${GITHUB_REF_NAME}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" playground
+      - name: refresh jsDelivr
+        run: |
+          for f in makit-check.wasm wasm_exec.js; do
+            curl -fsS "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@playground/$f" >/dev/null || true
+          done
