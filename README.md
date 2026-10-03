@@ -192,6 +192,12 @@ What it costs, measured — the full method and more numbers in [benchmark/](ben
 
 ![go test -bench: a decision in about 6 µs, the same with and without a cluster; a ban reaches the other replicas in about 2 ms](docs/img/bench-micro.png)
 
+End to end on a Linux runner, Envoy and Caddy asking makit next to the same paths without it (4 shared vCPUs carry the
+load generator, the proxies and makit at once, so part of the added latency is waiting for a CPU — the report says
+how to measure makit alone):
+
+![benchmark/run.sh http: makit in front, Caddy and Envoy asking makit, normal and attack traffic, no errors](docs/img/bench-http.png)
+
 ## makit notify
 
 Alerts for bans and scan findings on Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks or email:
