@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.7.0
+
+**Upgrading:** behind Caddy or nginx asking makit, paste the new snippet (`makit shield snippet caddy|nginx`) — makit
+now reads the visitor from `X-Forwarded-For` and no longer reads `X-Makit-Peer`, `X-Makit-Client` or
+`client_ip_header`. With an old snippet behind a CDN, every visitor is the CDN's address (`makit shield config check`
+and the gate's log say so).
+
 - `makit shield` stops exploits carried in headers, each a catalog rule named by its CVE and replayed from its public
   proof of concept: the Next.js middleware bypass (`x-middleware-subrequest`, CVE-2025-29927), Spring Cloud Function
   SpEL (CVE-2022-22963), Struts OGNL in `Content-Type` (CVE-2017-5638), F5 BIG-IP iControl (CVE-2022-1388), Fortinet
