@@ -28,7 +28,7 @@ import (
 // the background, once per sync interval, each replica sends the others what changed here: bans, unbans and allow
 // entries, and the requests counted against each rate limit and scoring window. The others add them in, so behind N
 // replicas a limit of 60 a minute stays 60 (not 60 × N), a scan spread across pods escalates as if it hit one, and an
-// IP banned by one pod is banned by all within a fraction of a second. A new replica first copies the bans of a running one.
+// IP banned by one pod is banned by all within milliseconds (list changes do not wait for the sync). A new replica first copies the bans of a running one.
 //
 // Every message is signed with a shared secret (HMAC-SHA256) over its time and body, and carries the sender's
 // sequence number: a forged or replayed message — which could inflate a count and get a visitor banned — is refused.
@@ -106,6 +106,7 @@ type Cluster struct {
 	remote   map[string]time.Time
 	baseline bool
 	pulled   bool // the bans of a running replica are copied (or there was none to copy from)
+	kick     chan struct{} // a list change: send it now instead of at the next sync
 	recvd    atomic.Uint64
 	refused  atomic.Uint64
 }
@@ -123,7 +124,7 @@ func NewCluster(g *Gate, cfg ClusterConfig) (*Cluster, error) {
 	c := &Cluster{g: g, cfg: cfg, secret: secret, node: host + "-" + hex.EncodeToString(id),
 		client: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConnsPerHost: 4}},
 		peers:  map[string]*peerState{}, self: map[string]bool{}, lastSeq: map[string]uint64{}, seen: map[string]time.Time{}, known: map[string]Entry{},
-		remote: map[string]time.Time{}}
+		remote: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	// Sequence numbers survive a restart without being stored: they start from the clock.
 	c.seq.Store(uint64(time.Now().UnixNano()))
 	return c, nil
@@ -163,6 +164,10 @@ func (c *Cluster) publish(op string, e Entry) {
 	}
 	c.mu.Lock()
 	c.ops = append(c.ops, ClusterOp{Op: op, Entry: e})
+	select { // wake the sender: a ban should not wait for the next sync
+	case c.kick <- struct{}{}:
+	default:
+	}
 	list := "b"
 	if op == "allow" || op == "unallow" {
 		list = "a"
@@ -232,6 +237,12 @@ func (c *Cluster) Run(ctx context.Context) error {
 	// 15 s; copy a running replica's bans as soon as one answers.
 	sync := time.NewTicker(c.cfg.interval())
 	defer sync.Stop()
+	// List changes go out at once, but at most every 20 ms: a botnet's thousands of bans a second travel in batches.
+	const minGap = 20 * time.Millisecond
+	var lastPush time.Time
+	soon := time.NewTimer(time.Hour)
+	soon.Stop()
+	pushNow := func() { lastPush = time.Now(); c.push() }
 	resolveEvery, started := 2*time.Second, time.Now()
 	next := time.Now()
 	for {
@@ -250,7 +261,15 @@ func (c *Cluster) Run(ctx context.Context) error {
 			c.push() // the last changes, so a replica that stops does not take its bans with it
 			return nil
 		case <-sync.C:
-			c.push()
+			pushNow()
+		case <-c.kick:
+			if wait := minGap - time.Since(lastPush); wait > 0 {
+				soon.Reset(wait)
+			} else {
+				pushNow()
+			}
+		case <-soon.C:
+			pushNow()
 		}
 	}
 }

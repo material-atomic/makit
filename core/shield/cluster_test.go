@@ -5,9 +5,12 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -297,4 +300,61 @@ func BenchmarkDecideCluster(b *testing.B) {
 			}
 		})
 	}
+}
+
+// How long a ban made on one replica takes to be enforced by the two others (localhost): reported as ms/ban and the
+// worst; the run waits for every replica each time. Bans do not wait for the 250 ms sync: they are sent at once.
+func BenchmarkClusterBanPropagation(b *testing.B) {
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+	StateDir = b.TempDir()
+	b.Setenv("MAKIT_CLUSTER_SECRET", testSecret)
+	addrs := []string{freeAddrB(b), freeAddrB(b), freeAddrB(b)}
+	var gs []*Gate
+	for i := range addrs {
+		g := &Gate{stats: map[string]int64{}}
+		g.policy.Store(&Policy{Allow: NewSet(), Block: NewSet(), Limiter: NewLimiter()})
+		c, err := NewCluster(g, ClusterConfig{Listen: addrs[i], Peers: addrs, Sync: "250ms"})
+		if err != nil {
+			b.Fatal(err)
+		}
+		g.cluster = c
+		c.StateLoaded(&State{})
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { _ = c.Run(ctx) }()
+		b.Cleanup(cancel)
+		gs = append(gs, g)
+	}
+	time.Sleep(time.Second) // the replicas find each other
+	var worst time.Duration
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer() // a ban on its own: past the 20 ms batching gap of the one before
+		time.Sleep(25 * time.Millisecond)
+		b.StartTimer()
+		ip := netip.AddrFrom4([4]byte{203, 0, byte(113 + i/250), byte(i % 250)})
+		start := time.Now()
+		gs[0].autoBan(ip, time.Hour, "rule:MK-HTTP-PROBE", "probe", "", false)
+		for _, g := range gs[1:] {
+			for {
+				if _, ok := g.policy.Load().Block.Match(ip, time.Now()); ok {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+		worst = max(worst, time.Since(start))
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.Elapsed().Milliseconds())/float64(b.N), "ms/ban")
+	b.ReportMetric(float64(worst.Milliseconds()), "ms-worst")
+}
+
+func freeAddrB(b *testing.B) string {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().String()
 }

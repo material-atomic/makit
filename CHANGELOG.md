@@ -57,6 +57,8 @@
   than /8 / /32; beyond 10,000 addresses the newest bans win. Credentials from the AWS chain (EKS Pod Identity, IRSA,
   instance role); the chart has a ServiceAccount to annotate.
 - Cluster sync every 250 ms by default (was 1 s): between two syncs a limit can be exceeded by about rate × interval.
+- Bans, unbans and allow entries reach the other replicas at once instead of at the next sync: ~2 ms on average
+  (was a full sync interval), batched at most every 20 ms under a flood.
 - Config playground on makit.sh (`playground.html`): presets (single site, many domains, behind Cloudflare, behind a load
   balancer in Kubernetes, makit in front), blocks for every part of `shield.yaml` and a builder for `notify.yaml`, the
   YAML editable both ways, exports as a file, a ConfigMap, Helm values or a Secret. Checked by makit's own config

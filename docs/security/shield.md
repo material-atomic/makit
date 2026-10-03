@@ -138,7 +138,8 @@ cluster:
 ```
 
 - **Bans, unbans and allow entries** — automatic ones and those made with `makit shield ban/allow` on any replica —
-  reach every replica within about one sync interval (≈0.4 s in tests with `sync: 100ms`).
+  reach every replica at once, without waiting for the sync: ~2 ms on average, 31 ms at worst on localhost
+  (`go test ./shield -bench ClusterBanPropagation`, Apple M1). Under a flood they travel in batches, at most 50 a second.
 - **Rate limits** count across replicas: windows are aligned on the clock, and each replica adds the others' counts to
   its own, so `limit 60/1m` stays 60 a minute for the whole cluster. Between two syncs a replica does not see the
   others' requests yet, so a burst can get about (request rate × sync interval) more through: at 10 requests a second
