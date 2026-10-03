@@ -8,7 +8,7 @@ One command-line tool (`makit`), MIT-licensed, for Ubuntu and Debian.
 | | What makit does |
 | --- | --- |
 | **Check** — `makit scan` | Read-only security check of the host and every Docker container (with your consent): malware and miner indicators, suspicious processes and connections, persistence, vulnerable npm packages (OSV), and posture — SSH, firewall, Docker ports, updates, kernel, secrets. Every finding links to a guide. |
-| **Protect** — `makit shield` | A gate in front of your web traffic: its own IP set (millions of entries, no ipset), allowlist, Cloudflare-aware client IPs, HTTP rules, request scoring (probes, XSS, SQL injection…), bots/crawlers/AI agents verified and handled by your policy, rate limits, automatic bans. Works with Caddy/nginx asking it, or in front of them. |
+| **Protect** — `makit shield` | A gate in front of your web traffic: its own IP set (millions of entries, no ipset), allowlist, the real client IP behind any CDN or load balancer, HTTP rules, request scoring (probes, XSS, SQL injection…), bots/crawlers/AI agents verified and handled by your policy, rate limits, automatic bans. Works with Caddy/nginx asking it, or in front of them. |
 | **Alert** — `makit notify`, `makit schedule` | Scheduled scans and ban reports to Telegram, Slack, Google Chat, Discord, Teams, ntfy, webhooks or email. |
 | **Set up and harden** — `makit init` | A fresh server in one command: upgrades, swap, Docker, firewall (Docker ports included), automatic updates, kernel and SSH hardening, fail2ban, AppArmor, auditd — idempotent, with `--dry-run`. |
 | **Watch** — `makit top` | A terminal dashboard: system, processes, containers, services, logs, setup. |
@@ -59,7 +59,7 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 | `makit scan [options]` | Read-only security check of the host and/or containers — see below. |
 | `makit rules list\|update\|path` | The security catalog `scan` uses; `update` fetches the newest one from this repository. |
 | `makit schedule scan daily\|weekly\|hourly\|off [--webhook=URL]` | Scheduled read-only scans (systemd timer) with a webhook alert when something MEDIUM or worse is found. Consent is asked once. |
-| `makit shield on\|off\|ban\|allow\|list\|log\|snippet …` | IP gate for web traffic — its own block set and allowlist, Cloudflare-aware, HTTP rules with automatic bans, request snapshots. Caddy/nginx ask it, or it sits in front of them — see below. |
+| `makit shield on\|off\|ban\|allow\|list\|log\|snippet …` | IP gate for web traffic — its own block set and allowlist, real client IPs behind any CDN or load balancer, HTTP rules with automatic bans, request snapshots. Caddy/nginx ask it, or it sits in front of them — see below. |
 | `makit docs [topic\|RULE-ID]` | The [security guides](docs/security/README.md), offline: what each finding means and how to fix it. |
 | `makit upgrade [--check] [vX.Y.Z]` | Checks GitHub for a newer makit and installs it after asking (`--check` only reports: exit 10 when an update exists). `self-update` is an alias. |
 | `makit version`, `makit -v`, `makit --version` | Prints the installed version. |
