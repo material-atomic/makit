@@ -27,9 +27,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
         run: |
-          v=${GITHUB_REF_NAME#v}
+          img=ghcr.io/${GITHUB_REPOSITORY_OWNER}/makit-shield
+          if [[ $GITHUB_REF_TYPE == tag ]]; then     # a release: its version, and latest
+            v=${GITHUB_REF_NAME#v}
+            echo "tags=$img:$v,$img:latest" >> "$GITHUB_OUTPUT"
+          else                                      # by hand from a branch: never latest
+            v=edge-${GITHUB_SHA::7}
+            echo "tags=$img:$v" >> "$GITHUB_OUTPUT"
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "tags=ghcr.io/${GITHUB_REPOSITORY_OWNER}/makit-shield:$v,ghcr.io/${GITHUB_REPOSITORY_OWNER}/makit-shield:latest" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -54,7 +60,9 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
           echo "signed and verified: ghcr.io/${GITHUB_REPOSITORY_OWNER}/makit-shield@${DIGEST}"
       - uses: azure/setup-helm@v4
+        if: github.ref_type == 'tag'
       - name: chart to ghcr.io (oci://ghcr.io/<owner>/charts/makit-shield)
+        if: github.ref_type == 'tag'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
