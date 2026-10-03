@@ -177,7 +177,7 @@ func printReplay(r *ReplayResult, against string) {
 	for _, k := range keys {
 		_, to, _ := strings.Cut(k, " → ")
 		fmt.Printf("  %s %s %s\n", term.Verdict(to, fmt.Sprintf("%-22s", k)), thousands(r.Changes[k]),
-			term.Dim(fmt.Sprintf("(%d clients)", r.Clients[k])))
+			term.Dim(fmt.Sprintf("(%d client%s)", r.Clients[k], map[bool]string{true: "", false: "s"}[r.Clients[k] == 1])))
 	}
 	if len(r.ByRule) > 0 {
 		rules := make([]string, 0, len(r.ByRule))

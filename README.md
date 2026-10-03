@@ -162,6 +162,36 @@ bans for the site only or the whole server, bot policy, scoring profiles, rules,
 
 Guide: [docs/security/bots.md](docs/security/bots.md).
 
+Check a config before it is loaded — every key, value, listener and catalog setting, with the line and the fix — and
+see what it would change on your real traffic (`--replay` runs an access log through the current and the new config;
+nothing is written). `makit shield edit` saves only a file that passes. Or build one in the browser:
+[makit.sh/playground.html](https://makit.sh/playground.html), checked by the same code compiled to WebAssembly.
+
+![makit shield config check finds a misspelt key and a wildcard ACME name](docs/img/config-check.png)
+
+![makit shield config check --replay shows which requests a new config would block](docs/img/config-replay.png)
+
+### Behind a load balancer, and in Kubernetes
+
+Behind AWS ALB or any proxy, the visitor is read from the right of `X-Forwarded-For` (trusted proxies skipped), so
+nobody picks their own IP; an NLB's PROXY protocol works too. In a cluster, makit-shield runs as a small Deployment
+(signed image, Helm chart) that Envoy Gateway, Istio, Traefik or ingress-nginx ask before every request, and its
+replicas share bans, rate limits and scores: banned on one pod means banned on all within milliseconds, and
+`limit 60/1m` stays 60 for the cluster — while every decision is still made from local memory. Bans can be pushed to
+AWS WAF so the load balancer drops that traffic first, `/metrics` feeds Prometheus, and ALB access logs can be
+analysed with the same policy. Guide: [docs/security/kubernetes.md](docs/security/kubernetes.md).
+
+```bash
+helm install shield oci://ghcr.io/material-atomic/charts/makit-shield -n makit --create-namespace
+makit shield snippet envoy-gateway --service shield-makit-shield --namespace makit --gateway eg
+```
+
+![tests/k8s-e2e.sh: bans, live config and a shared rate limit across 3 replicas on kind](docs/img/k8s-e2e.png)
+
+What it costs, measured — the full method and more numbers in [benchmark/](benchmark/):
+
+![go test -bench: a decision in about 6 µs, the same with and without a cluster; a ban reaches the other replicas in about 2 ms](docs/img/bench-micro.png)
+
 ## makit notify
 
 Alerts for bans and scan findings on Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks or email:
