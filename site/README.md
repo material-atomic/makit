@@ -9,5 +9,8 @@ page loads it through jsDelivr. At a release, upload these three files next to t
 - `js/playground.js`
 - `css/playground.css`
 
+Also kept here, as uploaded to makit.sh: `css/style.css` (the whole site, dark only) and `js/shots.js` (the 3D carousel
+of terminal captures on the home page; the images come from `docs/img/terminal/web/` through jsDelivr).
+
 Try it locally: `scripts/playground.sh`, copy `dist/playground/` to `site/playground/` with the site's `css/style.css`
 and `js/app.js`, and serve `site/` on `http://127.0.0.1` (the page then loads the WebAssembly from `playground/`).
