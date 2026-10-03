@@ -313,7 +313,7 @@ func cmdLists() error {
 func cmdCheck(cfgPath string, dirs []string, args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	peer := fs.String("peer", "", "TCP peer (the visitor, or the proxy such as Cloudflare)")
-	client := fs.String("client", "", "client IP header value (CF-Connecting-IP)")
+	client := fs.String("client", "", "the forwarding chain before the peer (X-Forwarded-For)")
 	uri := fs.String("uri", "/", "request URI")
 	method := fs.String("method", "GET", "method")
 	ua := fs.String("ua", "", "user agent")
@@ -535,8 +535,10 @@ func cmdSnippet(args []string) error {
 (makit_shield) {
 	forward_auth %s {
 		uri /check
-		header_up X-Makit-Peer {remote_host}
-		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+		# The chain as received plus the address Caddy got the request from, as any proxy appends it (Caddy itself
+		# would replace the chain unless it trusts that address). makit walks it back through trusted_proxies.
+		header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"
+		# Optional: makit's answer, for the app (X-Makit-Verdict too). Listed here, a value the visitor sent is replaced.
 		copy_headers X-Makit-Client
 	}
 }
@@ -553,8 +555,10 @@ location = /_makit_shield {
     proxy_pass http://%s/check?deny=403;   # nginx only passes 401/403 through
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
-    proxy_set_header X-Makit-Peer $remote_addr;           # do not use real_ip_header together with this
-    proxy_set_header X-Makit-Client $http_cf_connecting_ip;
+    # The chain as received plus the address nginx got the request from: makit walks it back through
+    # trusted_proxies. Without this line the right-most entry is whatever the visitor typed. Do not use
+    # real_ip_header together with it ($remote_addr must stay the connection's address).
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Method $request_method;
     proxy_set_header X-Forwarded-Uri $request_uri;
     proxy_set_header X-Forwarded-Host $host;
@@ -563,7 +567,7 @@ location = /_makit_shield {
 
 location / {
     auth_request /_makit_shield;
-    auth_request_set $makit_client $upstream_http_x_makit_client;
+    auth_request_set $makit_client $upstream_http_x_makit_client;   # optional: makit's answer, for the app
     proxy_set_header X-Real-IP $makit_client;
     proxy_pass http://app;
 }

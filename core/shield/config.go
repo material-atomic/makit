@@ -40,12 +40,12 @@ type Config struct {
 	Ask            bool       `yaml:"ask"`  // /check enforces (Caddy/nginx ask makit); off = /check always allows
 	Edge           bool       `yaml:"edge"` // makit in front: run the listeners
 	Listeners      []Listener `yaml:"listeners"`
-	TrustedProxies []string   `yaml:"trusted_proxies"` // presets (cloudflare, aws-alb, vpc, loopback) or CIDRs whose client-IP header is believed
-	ClientHeader   string     `yaml:"client_ip_header"`
-	Allow          []string   `yaml:"allow"`        // never blocked (your office, monitoring, CI)
-	KernelBlock    bool       `yaml:"kernel_block"` // also mirror the block set into nftables (ports makit does not front, floods)
-	Rules          bool       `yaml:"rules"`        // apply the catalog's HTTP rules (security/http/*.yaml)
-	RulesDirs      []string   `yaml:"rules_dirs"`   // default: the catalog directories
+	TrustedProxies []string   `yaml:"trusted_proxies"`  // presets (cloudflare, aws-alb, vpc, loopback) or CIDRs whose client-IP header is believed
+	ClientHeader   string     `yaml:"client_ip_header"` // no longer read: X-Forwarded-For, Forwarded, X-Real-IP are
+	Allow          []string   `yaml:"allow"`            // never blocked (your office, monitoring, CI)
+	KernelBlock    bool       `yaml:"kernel_block"`     // also mirror the block set into nftables (ports makit does not front, floods)
+	Rules          bool       `yaml:"rules"`            // apply the catalog's HTTP rules (security/http/*.yaml)
+	RulesDirs      []string   `yaml:"rules_dirs"`       // default: the catalog directories
 	Snapshot       struct {
 		Path  string `yaml:"path"`
 		MaxMB int    `yaml:"max_mb"`
@@ -162,7 +162,7 @@ func LoadConfig(path string) (*Config, error) {
 
 // defaultConfig is what a key left out of shield.yaml means.
 func defaultConfig() *Config {
-	c := &Config{Mode: "observe", Ask: true, ClientHeader: "CF-Connecting-IP", TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
+	c := &Config{Mode: "observe", Ask: true, TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
 	c.Snapshot.Path, c.Snapshot.MaxMB, c.Snapshot.Keep = "/var/log/makit/shield/requests.jsonl", 50, 5
 	return c
 }

@@ -79,9 +79,9 @@ edge: true
 	if !strings.Contains(got, "error line 1: trusted proxy range 0.0.0.0/0 is wider than /8") {
 		t.Errorf("a trusted range anyone is in must be refused:\n%s", got)
 	}
-	got = issuesText(CheckConfig([]byte("client_ip_header: X-Forwarded-For\ntrusted_proxies: []\n"), CheckOptions{}))
-	if !strings.Contains(got, "client_ip_header X-Forwarded-For is never read") {
-		t.Errorf("header without trusted proxies:\n%s", got)
+	got = issuesText(CheckConfig([]byte("client_ip_header: CF-Connecting-IP\n"), CheckOptions{}))
+	if !strings.Contains(got, "client_ip_header CF-Connecting-IP is no longer read") {
+		t.Errorf("client_ip_header from an older config:\n%s", got)
 	}
 }
 
@@ -101,7 +101,7 @@ sites:
 		t.Errorf("unknown channel:\n%s", got)
 	}
 	// The default config and the shipped example are clean.
-	for _, ok := range []string{"", "mode: observe\n", "trusted_proxies: [cloudflare, aws-alb]\nclient_ip_header: X-Forwarded-For\n"} {
+	for _, ok := range []string{"", "mode: observe\n", "trusted_proxies: [cloudflare, aws-alb]\n"} {
 		if is := CheckConfig([]byte(ok), CheckOptions{Dirs: []string{repoCatalog}}); len(is) != 0 {
 			t.Errorf("%q: %s", ok, issuesText(is))
 		}

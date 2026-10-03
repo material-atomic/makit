@@ -73,7 +73,7 @@ func TestAskedRequestFromEachProxy(t *testing.T) {
 	g := askingGate(t)
 	r := httptest.NewRequest("GET", "http://shop.example/check/.git/config", nil)
 	r.RemoteAddr = "10.0.3.4:5000"
-	r.Header.Set("X-Makit-Peer", "203.0.113.90")
+	r.Header.Set("X-Forwarded-For", "203.0.113.90")
 	w := httptest.NewRecorder()
 	g.checkHandler().ServeHTTP(w, r)
 	if w.Code != 403 {

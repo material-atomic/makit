@@ -36,7 +36,8 @@ static_resources:
                           allowed_headers:
                             patterns:
                               - exact: x-forwarded-for
-                              - exact: cf-connecting-ip
+                              - exact: forwarded
+                              - exact: x-real-ip
                               - exact: user-agent
                               - exact: referer
                               - exact: accept

@@ -201,7 +201,7 @@ func BenchmarkCheckEndpoint(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	g := &Gate{rec: rec, header: "CF-Connecting-IP", stats: map[string]int64{}}
+	g := &Gate{rec: rec, stats: map[string]int64{}}
 	g.policy.Store(p)
 	g.ask.Store(true)
 	h := g.checkHandler()
@@ -210,7 +210,7 @@ func BenchmarkCheckEndpoint(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:9180/check", nil)
 		r.RemoteAddr = "127.0.0.1:50000"
-		r.Header.Set("X-Makit-Peer", clientIP(i))
+		r.Header.Set("X-Forwarded-For", clientIP(i))
 		r.Header.Set("X-Forwarded-Uri", "/blog/how-to-harden-ssh")
 		r.Header.Set("X-Forwarded-Method", "GET")
 		r.Header.Set("User-Agent", chromeUA)

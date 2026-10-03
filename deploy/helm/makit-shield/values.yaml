@@ -15,7 +15,6 @@ config:
   mode: observe          # see what it would block first; then block
   ask: true
   admin: "0.0.0.0:9180"
-  client_ip_header: X-Forwarded-For
   trusted_proxies: [vpc] # the load balancer and gateway pods; narrow to their subnets when you can
   report:
     every: 5m

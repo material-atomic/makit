@@ -81,7 +81,6 @@ func TestTrustedProxyNeverBanned(t *testing.T) {
 func TestCheckWithoutPeerHeader(t *testing.T) {
 	g := askingGate(t)
 	g.policy.Store(albPolicy(t))
-	g.header = "X-Forwarded-For"
 	h := g.checkHandler()
 	ask := func(lines ...string) (int, string) {
 		r := httptest.NewRequest("GET", "http://10.0.0.20:9180/check", nil)
@@ -133,6 +132,53 @@ func BenchmarkClientIPChain(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if c, _ := p.clientIP(peer, "1.2.3.4, 198.51.100.9, 104.16.1.1"); c.IsUnspecified() {
 			b.Fatal(c)
+		}
+	}
+}
+
+// Whatever sits in front — Cloudflare, a cloud load balancer, both, a CDN, or nothing — makit reads the fields every
+// proxy writes: X-Forwarded-For (or Forwarded), with the asking proxy's own hop right-most. A provider's own header
+// (CF-Connecting-IP) passes through every proxy untouched, so it is never read: through a load balancer's public
+// address anyone could set it.
+func TestCheckBehindAnyInfrastructure(t *testing.T) {
+	g := askingGate(t)
+	p := albPolicy(t) // Cloudflare's 104.16.0.0/13 and the private ranges a VPC uses
+	g.policy.Store(p)
+	h := g.checkHandler()
+	ask := func(hdr map[string]string) string {
+		r := httptest.NewRequest("GET", "http://172.17.0.1:9180/check", nil)
+		r.RemoteAddr = "172.18.0.5:40000" // Caddy in Docker
+		for k, v := range hdr {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Header().Get("X-Makit-Client")
+	}
+	cases := []struct {
+		name   string
+		hdr    map[string]string
+		client string
+	}{
+		{"Cloudflare → load balancer → Caddy", map[string]string{"X-Forwarded-For": "45.155.207.1, 104.16.1.1, 10.104.0.2"}, "45.155.207.1"},
+		{"the same, the visitor's own X-Forwarded-For to the left",
+			map[string]string{"X-Forwarded-For": "1.2.3.4, 45.155.207.1, 104.16.1.1, 10.104.0.2"}, "45.155.207.1"},
+		{"straight to the load balancer, CF-Connecting-IP and X-Forwarded-For forged",
+			map[string]string{"X-Forwarded-For": "192.0.2.10, 104.16.1.1, 172.72.9.9, 10.104.0.2", "CF-Connecting-IP": "192.0.2.10"}, "172.72.9.9"},
+		{"Cloudflare → Caddy", map[string]string{"X-Forwarded-For": "45.155.207.1, 104.16.1.1"}, "45.155.207.1"},
+		{"not Cloudflare, CF-Connecting-IP forged", map[string]string{"X-Forwarded-For": "203.0.113.66", "CF-Connecting-IP": "192.0.2.10"}, "203.0.113.66"},
+		{"AWS ALB alone", map[string]string{"X-Forwarded-For": "1.2.3.4, 203.0.113.7, 10.0.1.5"}, "203.0.113.7"},
+		{"Caddy appending to a missing header", map[string]string{"X-Forwarded-For": ", 203.0.113.8"}, "203.0.113.8"},
+		{"RFC 7239 Forwarded", map[string]string{"Forwarded": `for=192.0.2.10, for="[2001:db8::1]:443";proto=https, for=10.0.1.5`}, "2001:db8::1"},
+		{"Forwarded with an obfuscated hop stops at the last trusted one", map[string]string{"Forwarded": "for=_hidden, for=10.0.1.5"}, "10.0.1.5"},
+		{"X-Real-IP from a trusted proxy", map[string]string{"X-Forwarded-For": "10.0.1.5", "X-Real-IP": "203.0.113.9"}, "203.0.113.9"},
+		{"X-Real-IP from anyone else", map[string]string{"X-Forwarded-For": "203.0.113.66", "X-Real-IP": "192.0.2.10"}, "203.0.113.66"},
+		{"X-Makit-* headers are not input", map[string]string{"X-Forwarded-For": "203.0.113.66", "X-Makit-Peer": "104.16.1.1",
+			"X-Makit-Client": "192.0.2.10"}, "203.0.113.66"},
+	}
+	for _, c := range cases {
+		if got := ask(c.hdr); got != c.client {
+			t.Errorf("%s: client %s, want %s", c.name, got, c.client)
 		}
 	}
 }

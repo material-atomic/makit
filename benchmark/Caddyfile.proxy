@@ -9,8 +9,7 @@
 :82 {
 	forward_auth makit:9180 {
 		uri /check
-		header_up X-Makit-Peer {remote_host}
-		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"
 		copy_headers X-Makit-Client
 	}
 	reverse_proxy app:80

@@ -11,8 +11,9 @@ ask: true                    # Caddy/nginx ask makit (/check); off = /check allo
 edge: false                  # makit in front of Caddy/nginx (listeners below) — makit shield edge on|off
 admin: 127.0.0.1:9180        # /check endpoint for Caddy forward_auth / nginx auth_request (makit shield snippet caddy|nginx)
                              # Caddy/nginx in Docker: listen on the bridge address too, e.g. 172.17.0.1:9180
-trusted_proxies: [cloudflare]   # only these peers may tell the client IP (CF-Connecting-IP); add your load balancer CIDRs
-client_ip_header: CF-Connecting-IP
+trusted_proxies: [cloudflare]   # the proxies in front (CDN, load balancer): cloudflare, aws-alb, vpc, loopback or CIDRs.
+                                # The visitor is read from X-Forwarded-For (or Forwarded, X-Real-IP), walking back
+                                # through these — never from a header a client could have sent past them
 allow: []                    # never blocked, e.g. [203.0.113.0/24, 198.51.100.7]
 rules: true                  # HTTP rules from the catalog (security/http/*.yaml), with automatic bans
 kernel_block: false          # also drop blocked IPs in the kernel (nftables) — for ports makit does not see, or floods
@@ -109,8 +110,8 @@ makit shield report          the latest batch report (sent through makit notify 
 makit shield analyze FILE    score an nginx/Caddy access log with the same policy
 makit shield customize …     your own copy of the scoring set, bot catalog or rules
 makit shield config check [FILE] [--replay LOG]   check a config before it is loaded; --replay shows what it would change
-Blocks IPs from its own set (no ipset), Cloudflare-aware: behind Cloudflare it reads the visitor's IP from
-CF-Connecting-IP, but only when the connection really comes from Cloudflare. Two ways to use it:
+Blocks IPs from its own set (no ipset). Behind a CDN or load balancer it finds the visitor in X-Forwarded-For,
+walking back through trusted_proxies, so a client cannot choose its address. Two ways to use it:
   · Caddy/nginx ask makit before each request (makit shield snippet caddy|nginx)
   · makit in front of Caddy/nginx (listeners in $SHIELD_CONF)
 Docs: makit docs shield"; return ;;

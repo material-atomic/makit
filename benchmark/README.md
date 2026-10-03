@@ -25,7 +25,7 @@ ranges, the bot score, and 100,000 distinct visitors so per-IP state is realisti
 | Benchmark | What it is |
 | --- | --- |
 | `Decide/browser` | a normal page view from a browser: every check runs and lets it through (the common case) |
-| `Decide/browser-via-cloudflare` | same, client IP taken from `CF-Connecting-IP` of a trusted proxy |
+| `Decide/browser-via-cloudflare` | same, client IP taken from `X-Forwarded-For` of a trusted proxy |
 | `Decide/listed-ip-1M` | a visitor in the 1M-entry list: blocked by the set lookup |
 | `Decide/attack-xss`, `probe-dotenv` | an attack found by scoring, a probe caught by a rule |
 | `Decide/googlebot-verified` | the real Googlebot (published ranges): let through without rules or scores |

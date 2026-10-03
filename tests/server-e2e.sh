@@ -30,7 +30,6 @@ mode: block
 ask: true
 admin: 172.17.0.1:9180
 trusted_proxies: [cloudflare]
-client_ip_header: CF-Connecting-IP
 YAML
 on 'makit shield config check /etc/makit/shield.yaml' | tail -1
 on 'ufw allow from 172.16.0.0/12 to 172.17.0.1 port 9180 proto tcp' >/dev/null
@@ -58,9 +57,9 @@ grep -q "${ver#v}" <<<"$status" && ok "makit shield status answers, version ${ve
 step "a proxy in a container asks the gate, as Caddy will"
 on 'docker network inspect goes >/dev/null 2>&1 || docker network create goes >/dev/null'
 ask() { on "docker run --rm --network goes curlimages/curl:8.10.1 -s -o /dev/null -w '%{http_code}' $* http://172.17.0.1:9180/check"; }
-code=$(ask "-H 'X-Makit-Peer: 198.51.100.20' -H 'X-Forwarded-Method: GET' -H 'X-Forwarded-Uri: /' -H 'X-Forwarded-Host: goes.vn' -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36' -H 'Accept: text/html' -H 'Accept-Language: vi' -H 'Accept-Encoding: gzip' -H 'Sec-Fetch-Mode: navigate'")
+code=$(ask "-H 'X-Forwarded-For: 198.51.100.20' -H 'X-Forwarded-Method: GET' -H 'X-Forwarded-Uri: /' -H 'X-Forwarded-Host: goes.vn' -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36' -H 'Accept: text/html' -H 'Accept-Language: vi' -H 'Accept-Encoding: gzip' -H 'Sec-Fetch-Mode: navigate'")
 [[ $code == 200 ]] && ok "a visitor's page view: 200" || fail "a visitor's page view: $code"
-code=$(ask "-H 'X-Makit-Peer: 203.0.113.9' -H 'X-Forwarded-Method: GET' -H 'X-Forwarded-Uri: /.env' -H 'X-Forwarded-Host: goes.vn'")
+code=$(ask "-H 'X-Forwarded-For: 203.0.113.9' -H 'X-Forwarded-Method: GET' -H 'X-Forwarded-Uri: /.env' -H 'X-Forwarded-Host: goes.vn'")
 [[ $code == 403 ]] && ok "a probe for /.env: 403" || fail "a probe for /.env: $code"
 on 'makit shield log -n 2' | tail -2
 # The gate saves automatic bans once a second: wait until this one is in the list before taking it out.

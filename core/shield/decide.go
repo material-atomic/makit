@@ -10,8 +10,8 @@ import (
 
 // Request is what a reverse proxy tells the gate about one request.
 type Request struct {
-	Peer     string // TCP peer address as the proxy saw it (X-Makit-Peer)
-	Client   string // client IP header from the proxy chain (X-Makit-Client, e.g. CF-Connecting-IP)
+	Peer     string // the address the request reached the last proxy from (the asking proxy's own hop)
+	Client   string // the forwarding chain before Peer (X-Forwarded-For, Forwarded), else X-Real-IP
 	Method   string
 	Host     string
 	URI      string
@@ -170,7 +170,7 @@ const maxHops = 16
 // clientIP resolves the visitor behind a trusted proxy. Each proxy appends the address it received the request from,
 // so a chain such as X-Forwarded-For is read from the right: trusted proxies are skipped and the first address that
 // is not one is the visitor. Everything to its left was written by the visitor and is never believed — a client
-// cannot pick its own IP by sending the header. A single-address header (CF-Connecting-IP) is the same walk of one.
+// cannot pick its own IP by sending the header. A single address (X-Real-IP) is the same walk of one.
 // The header counts only when the peer itself is a trusted proxy; from anyone else the peer is the client.
 func (p *Policy) clientIP(peer netip.Addr, header string) (client netip.Addr, viaProxy bool) {
 	if header == "" || !p.trusted(peer) {

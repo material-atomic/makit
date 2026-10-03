@@ -132,8 +132,8 @@ Exit status: `0` nothing above LOW, `1` MEDIUM or worse, `2` error, `3` consent 
 ## makit shield
 
 Blocks visitors by IP before they reach your app, with its own set (IPs/CIDRs with expiry — no ipset) and an
-allowlist that always wins. Behind Cloudflare it uses the visitor's IP from `CF-Connecting-IP`, but only when the
-connection really comes from Cloudflare; a direct visitor faking the header is judged on its own IP. HTTP rules from the
+allowlist that always wins. Behind a CDN, a load balancer or both it finds the visitor in `X-Forwarded-For`, walking
+back through the proxies you trust (`trusted_proxies`); a visitor faking headers is judged on its own IP. HTTP rules from the
 catalog ban scanners, secret probing, path traversal and the React2Shell exploitation pattern automatically.
 
 ```bash

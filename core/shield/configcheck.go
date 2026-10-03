@@ -309,9 +309,10 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 					map[bool]int{true: 8, false: 32}[p.Addr().Is4()]))
 		}
 	}
-	if len(trusted) == 0 && cfg.ClientHeader != "" && cfg.ClientHeader != "CF-Connecting-IP" {
+	if cfg.ClientHeader != "" {
 		c.add("warning", c.line("client_ip_header"), "client_ip_header",
-			fmt.Sprintf("client_ip_header %s is never read: no trusted_proxies are set, so every client is judged on its own address", cfg.ClientHeader))
+			fmt.Sprintf("client_ip_header %s is no longer read: makit finds the visitor in X-Forwarded-For (or Forwarded, or X-Real-IP), "+
+				"walking back through trusted_proxies — what every proxy, CDN and load balancer writes. Remove the line", cfg.ClientHeader))
 	}
 	private := false
 	for _, p := range trusted {

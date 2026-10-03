@@ -14,9 +14,9 @@ func TestMetrics(t *testing.T) {
 	g.metrics = newGateMetrics()
 	h := g.checkHandler()
 	for _, hdr := range []map[string]string{
-		{"X-Makit-Peer": "198.51.100.10", "X-Forwarded-Uri": "/"},
-		{"X-Makit-Peer": "198.51.100.9"},
-		{"X-Makit-Peer": "203.0.113.80", "X-Forwarded-Uri": "/.env"},
+		{"X-Forwarded-For": "198.51.100.10", "X-Forwarded-Uri": "/"},
+		{"X-Forwarded-For": "198.51.100.9"},
+		{"X-Forwarded-For": "203.0.113.80", "X-Forwarded-Uri": "/.env"},
 	} {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:9180/check", nil)
 		r.RemoteAddr = "127.0.0.1:4000"

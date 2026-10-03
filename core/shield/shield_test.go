@@ -156,7 +156,7 @@ func TestStateAndGuards(t *testing.T) {
 }
 
 func gate(t *testing.T) *Gate {
-	g := &Gate{header: "CF-Connecting-IP", stats: map[string]int64{}}
+	g := &Gate{stats: map[string]int64{}}
 	g.policy.Store(policy(t))
 	return g
 }
@@ -179,16 +179,16 @@ func TestCheckHandler(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w.Code
 	}
-	if c := ask("127.0.0.1:4000", map[string]string{"X-Makit-Peer": "104.16.1.1", "X-Makit-Client": "198.51.100.9"}); c != 403 {
+	if c := ask("127.0.0.1:4000", map[string]string{"X-Forwarded-For": "198.51.100.9, 104.16.1.1"}); c != 403 {
 		t.Errorf("blocked via Cloudflare: %d", c)
 	}
-	if c := ask("127.0.0.1:4000", map[string]string{"X-Makit-Peer": "198.51.100.10", "X-Forwarded-Uri": "/"}); c != 200 {
+	if c := ask("127.0.0.1:4000", map[string]string{"X-Forwarded-For": "198.51.100.10", "X-Forwarded-Uri": "/"}); c != 200 {
 		t.Errorf("allowed: %d", c)
 	}
-	if c := ask("172.17.0.2:4000", map[string]string{"X-Makit-Peer": "198.51.100.10", "X-Forwarded-Uri": "/.git/config"}); c != 403 {
+	if c := ask("172.17.0.2:4000", map[string]string{"X-Forwarded-For": "198.51.100.10", "X-Forwarded-Uri": "/.git/config"}); c != 403 {
 		t.Errorf("rule via Docker-network proxy: %d", c)
 	}
-	if c := ask("203.0.113.9:4000", map[string]string{"X-Makit-Peer": "198.51.100.10"}); c != 403 {
+	if c := ask("203.0.113.9:4000", map[string]string{"X-Forwarded-For": "198.51.100.10"}); c != 403 {
 		t.Errorf("public callers must not use /check: %d", c)
 	}
 }
@@ -218,10 +218,10 @@ func TestEdgeHandler(t *testing.T) {
 	if c, b := do("198.51.100.10:5555", map[string]string{"X-Forwarded-For": "1.2.3.4"}, "/"); c != 200 || b != "198.51.100.10|app.example" {
 		t.Errorf("direct client: %d %q (spoofed X-Forwarded-For must be replaced, Host kept)", c, b)
 	}
-	if c, b := do("104.16.1.1:5555", map[string]string{"CF-Connecting-IP": "203.0.113.70"}, "/"); c != 200 || !strings.HasPrefix(b, "203.0.113.70|") {
+	if c, b := do("104.16.1.1:5555", map[string]string{"X-Forwarded-For": "203.0.113.70"}, "/"); c != 200 || !strings.HasPrefix(b, "203.0.113.70|") {
 		t.Errorf("via Cloudflare: %d %q", c, b)
 	}
-	if c, _ := do("104.16.1.1:5555", map[string]string{"CF-Connecting-IP": "198.51.100.9"}, "/"); c != 403 {
+	if c, _ := do("104.16.1.1:5555", map[string]string{"X-Forwarded-For": "198.51.100.9"}, "/"); c != 403 {
 		t.Errorf("banned client via Cloudflare: %d", c)
 	}
 }
@@ -272,7 +272,7 @@ func TestAskSwitch(t *testing.T) {
 	h := g.checkHandler()
 	r := httptest.NewRequest("GET", "http://127.0.0.1:9180/check", nil)
 	r.RemoteAddr = "127.0.0.1:1"
-	r.Header.Set("X-Makit-Peer", "198.51.100.9")
+	r.Header.Set("X-Forwarded-For", "198.51.100.9")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r) // ask is off by default in a fresh Gate
 	if w.Code != 200 {

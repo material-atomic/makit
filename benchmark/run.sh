@@ -119,7 +119,7 @@ if [[ $mode == http || $mode == all ]]; then
     echo "## Request latency (HTTP, end to end)"
     echo
     echo "$conc keep-alive connections for $dur per run, after a 3 s warm-up. Visitors are spread over 100,000 IPs"
-    echo "(CF-Connecting-IP through a trusted proxy). Every makit decision runs the full policy and writes a request"
+    echo "(X-Forwarded-For through a trusted proxy). Every makit decision runs the full policy and writes a request"
     echo "snapshot to disk. \"Added\" is the difference with the same path without makit. Attack traffic is XSS,"
     echo "secret probes, SQL injection, Log4Shell and path traversal: makit answers 403 itself and bans the IPs."
     echo

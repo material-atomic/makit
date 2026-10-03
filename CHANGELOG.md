@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased
+- `makit shield` reads the visitor from the fields every proxy writes — `X-Forwarded-For`, else `Forwarded`, else
+  `X-Real-IP` — walking back through `trusted_proxies`, whatever is in front: Cloudflare, CloudFront, Fastly, a
+  DigitalOcean or AWS load balancer, or several. A provider's own header (`CF-Connecting-IP`) is no longer read:
+  every proxy behind the provider passes it on as received, so with a load balancer between Cloudflare and the
+  server, a client that skipped Cloudflare chose its own address with it — and got any address it named banned (an
+  office, Googlebot) instead of its own. `client_ip_header` is no longer read (`config check` says so).
+- Ask mode needs no header of makit's: the asking proxy appends the address it got the request from to
+  `X-Forwarded-For`, as proxies do (nginx `$proxy_add_x_forwarded_for`; the Caddy snippet's
+  `header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"`, since Caddy replaces the chain
+  unless it trusts its peer). `X-Makit-Peer` and `X-Makit-Client` are no longer read. **Paste the new snippet**
+  (`makit shield snippet caddy|nginx`): with an old one, the visitor behind a CDN is the CDN's address. makit's
+  `X-Makit-Client` and `X-Makit-Verdict` answers only tell the infrastructure the request went through makit; what
+  the app sees is the proxy's to set.
 - `makit shield`: the gate answers this machine at any of its own addresses, not only loopback and private ones. With
   `admin: 172.17.0.1:9180` and docker0 down (nothing on Docker's default bridge), a request from the host leaves
   through lo and Docker's `MASQUERADE` rewrites its source to eth0's public address: the gate refused it, and

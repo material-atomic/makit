@@ -28,12 +28,12 @@ let ready = false;
 const PRESETS = {
   'Single site': {
     mode: 'observe', ask: true,
-    trusted_proxies: ['cloudflare'], client_ip_header: 'CF-Connecting-IP',
+    trusted_proxies: ['cloudflare'],
     report: { every: '5m', min_level: 'high' },
   },
   'Many domains': {
     mode: 'observe', ask: true,
-    trusted_proxies: ['cloudflare'], client_ip_header: 'CF-Connecting-IP',
+    trusted_proxies: ['cloudflare'],
     ban_scope: 'server',
     sites: [
       { name: 'shop', match: ['shop.example.com'], mode: 'block' },
@@ -42,17 +42,17 @@ const PRESETS = {
   },
   'Behind Cloudflare': {
     mode: 'block', ask: true,
-    trusted_proxies: ['cloudflare'], client_ip_header: 'CF-Connecting-IP',
+    trusted_proxies: ['cloudflare'],
     bots: { policy: { 'ai-crawler': 'block' } },
   },
   'Behind a load balancer (Kubernetes)': {
     mode: 'observe', ask: true, admin: '0.0.0.0:9180',
-    client_ip_header: 'X-Forwarded-For', trusted_proxies: ['aws-alb'],
+    trusted_proxies: ['aws-alb'],
     cluster: { listen: ':9181', peers: ['dns:makit-shield-headless.makit.svc.cluster.local:9181'], sync: '250ms' },
   },
   'makit in front (edge)': {
     mode: 'observe', ask: false, edge: true,
-    trusted_proxies: ['cloudflare'], client_ip_header: 'CF-Connecting-IP',
+    trusted_proxies: ['cloudflare'],
     listeners: [{ name: 'web', listen: ':443', upstream: 'http://127.0.0.1:8080', tls: { acme: ['example.com'] } }],
   },
 };
@@ -145,13 +145,12 @@ function renderBlocks() {
         return el('label', { class: 'check' }, c, p);
       })),
       el('div', { class: 'row' },
-        field('Client IP header', select('client_ip_header', ['CF-Connecting-IP', 'X-Forwarded-For'], 'CF-Connecting-IP')),
         field('More trusted ranges (CIDR, one per line)', (() => {
           const t = el('textarea', { class: 'mono', rows: 2, placeholder: '10.0.1.0/24', onchange: (e) => set('trusted_proxies', [...tp.filter((x) => presets.includes(x)), ...lines(e.target.value)]) });
           t.value = cidrs.join('\n');
           return t;
         })())),
-      el('p', { class: 'note' }, 'X-Forwarded-For is read from the right: trusted proxies are skipped, so a visitor cannot pick its own IP. Anything trusted may name its client — narrow vpc/aws-alb to your load balancer subnets when you can.')),
+      el('p', { class: 'note' }, 'The visitor is read from X-Forwarded-For (or Forwarded), from the right: trusted proxies are skipped, so a visitor cannot pick its own IP — behind any CDN or load balancer, never from a provider header such as CF-Connecting-IP. Anything trusted may name its client — narrow vpc/aws-alb to your load balancer subnets when you can.')),
     block('allow', 'Allowlist', `${(get('allow', []) || []).length} entries`,
       field('Never blocked: your office, monitoring, CI (IP or CIDR per line)', list('allow', '203.0.113.10\n198.51.100.0/24'))),
     botsBlock(),

@@ -11,7 +11,7 @@ import (
 // askHeaders are the request headers makit reads; a gateway that sends only the headers it is told to must send these.
 var askHeaders = []string{"x-forwarded-for", "user-agent", "referer", "accept", "accept-encoding", "accept-language",
 	"sec-ch-ua", "sec-fetch-mode", "next-action", "signature", "signature-input", "signature-agent",
-	"cf-connecting-ip", "cf-ipcountry", "cf-ray", "x-forwarded-proto"}
+	"forwarded", "x-real-ip", "cf-ipcountry", "cf-ray", "x-forwarded-proto"}
 
 type snippetOpts struct {
 	addr, service, namespace, gateway, gatewayNS string
@@ -30,8 +30,8 @@ func k8sSnippet(kind string, o snippetOpts) (string, bool) {
 			fmt.Fprintf(&hs, "        - %s\n", h)
 		}
 		return fmt.Sprintf(`# Envoy Gateway (Gateway API): every route of the Gateway asks makit first.
-# The client IP: makit reads X-Forwarded-For from the right (trusted_proxies: [aws-alb] or your subnets, and
-# client_ip_header: X-Forwarded-For in shield.yaml), so a visitor cannot choose its own.
+# The client IP: makit reads X-Forwarded-For from the right (trusted_proxies: [aws-alb] or your subnets in
+# shield.yaml), so a visitor cannot choose its own.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:

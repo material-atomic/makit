@@ -199,17 +199,12 @@ func (g *Gate) checkHandler() http.Handler {
 			return
 		}
 		h := r.Header
-		peer := h.Get("X-Makit-Peer")
-		chain := headerChain(h, "X-Forwarded-For")
-		if peer == "" {
-			// A proxy without the header (Traefik forwardAuth, ingress-nginx auth-url): the right-most
-			// X-Forwarded-For entry is the address the asking proxy itself received the request from. The left-most
-			// is whatever the visitor typed.
-			peer = chain
-			if i := strings.LastIndexByte(chain, ','); i >= 0 {
-				peer = chain[i+1:]
-			}
-			peer = strings.TrimSpace(peer)
+		// Where the request came from, in the fields every proxy writes: the asking proxy appended the address it
+		// received the request from (nginx $proxy_add_x_forwarded_for, Traefik, Envoy, Caddy's own), so that is the
+		// right-most hop; what is left of it was appended by the proxies before, or typed by the visitor.
+		peer, chain := lastHop(forwardedFor(h))
+		if chain == "" {
+			chain = h.Get("X-Real-IP")
 		}
 		hdr := map[string]string{}
 		for k, v := range h {
@@ -218,7 +213,7 @@ func (g *Gate) checkHandler() http.Handler {
 			}
 		}
 		method, uri, host := askedRequest(r)
-		q := Request{Peer: peer, Client: firstNonEmpty(h.Get("X-Makit-Client"), headerChain(h, g.header)), Method: method, Host: host,
+		q := Request{Peer: peer, Client: chain, Method: method, Host: host,
 			URI: uri, UA: h.Get("User-Agent"), Referer: h.Get("Referer"), Country: h.Get("CF-IPCountry"), Ray: h.Get("CF-Ray"),
 			Headers: hdr, Received: time.Now()}
 		if !g.ask.Load() {
@@ -344,6 +339,44 @@ func headerChain(h http.Header, name string) string {
 	return strings.Join(v, ", ")
 }
 
+// forwardedFor is the forwarding chain a request carries, oldest hop first: X-Forwarded-For, else the for= of RFC 7239
+// Forwarded. Never a provider's own header (CF-Connecting-IP, True-Client-IP, Fastly-Client-IP…): every proxy on
+// the way passes those through as it received them, so whoever reaches any one of them chooses the value, while
+// X-Forwarded-For and Forwarded are appended to by each hop. Cloudflare, CloudFront, Fastly, Akamai and every load
+// balancer append the visitor there too.
+func forwardedFor(h http.Header) string {
+	if xff := headerChain(h, "X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	fwd := headerChain(h, "Forwarded")
+	if fwd == "" {
+		return ""
+	}
+	var hops []string
+	for _, el := range strings.Split(fwd, ",") {
+		hop := "_" // an element without for= (or an obfuscated one) is a hop that names nobody: the walk stops there
+		for _, pair := range strings.Split(el, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
+			if ok && strings.EqualFold(k, "for") {
+				hop = strings.Trim(v, `"`)
+			}
+		}
+		hops = append(hops, hop)
+	}
+	return strings.Join(hops, ", ")
+}
+
+// lastHop splits a chain into its right-most address and everything before it. Empty entries (", 203.0.113.9"
+// from a proxy that appends to a missing header) are dropped at the joint.
+func lastHop(chain string) (last, rest string) {
+	chain = strings.TrimRight(strings.TrimSpace(chain), ", ")
+	i := strings.LastIndexByte(chain, ',')
+	if i < 0 {
+		return chain, ""
+	}
+	return strings.TrimSpace(chain[i+1:]), strings.TrimRight(strings.TrimSpace(chain[:i]), ", ")
+}
+
 func firstNonEmpty(v ...string) string {
 	for _, s := range v {
 		if s != "" {
@@ -363,7 +396,7 @@ func Serve(cfgPath string, dirs []string) error {
 	if err != nil {
 		return err
 	}
-	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}, metrics: newGateMetrics()}
+	g := &Gate{rec: rec, stats: map[string]int64{}, metrics: newGateMetrics()}
 	// Batch reports go to every channel of `makit notify` whose min_level they reach (the channel file is read at
 	// each send, so channels added later work without a restart).
 	g.send = func(title, text, level string, channels []string) { go sendNotify(title, text, level, channels) }
@@ -493,7 +526,6 @@ func Serve(cfgPath string, dirs []string) error {
 			}
 		}
 		g.setLabels(labels)
-		g.header = c.ClientHeader
 		g.policy.Store(p)
 		g.ask.Store(c.Ask && c.Mode != "pass")
 		applyEdge(c)

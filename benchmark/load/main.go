@@ -80,7 +80,7 @@ func run(args []string) {
 	dur := fs.Duration("d", 15*time.Second, "measured duration")
 	warm := fs.Duration("warmup", 3*time.Second, "unmeasured warm-up")
 	profile := fs.String("profile", "browser", "browser: real-browser requests; attack: XSS, probes, injections")
-	spread := fs.Int("spread", 100000, "distinct visitor IPs sent as CF-Connecting-IP (0: none)")
+	spread := fs.Int("spread", 100000, "distinct visitor IPs sent as X-Forwarded-For (0: none)")
 	out := fs.String("out", "", "append the JSON result to this file")
 	fs.Parse(args)
 	tr := &http.Transport{MaxIdleConns: *conc * 2, MaxIdleConnsPerHost: *conc * 2, DisableCompression: true,
@@ -118,7 +118,7 @@ func run(args []string) {
 				req.Header.Set("Referer", base+"/")
 				if *spread > 0 {
 					i := rng.IntN(*spread)
-					req.Header.Set("CF-Connecting-IP", fmt.Sprintf("100.%d.%d.%d", 64+(i>>16)&63, (i>>8)&255, i&255))
+					req.Header.Set("X-Forwarded-For", fmt.Sprintf("100.%d.%d.%d", 64+(i>>16)&63, (i>>8)&255, i&255))
 				}
 				start := time.Now()
 				res, err := cl.Do(req)

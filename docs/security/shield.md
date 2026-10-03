@@ -19,12 +19,21 @@ Caddy (`import makit_shield` in each site):
 (makit_shield) {
 	forward_auth 127.0.0.1:9180 {
 		uri /check
-		header_up X-Makit-Peer {remote_host}
-		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"
 		copy_headers X-Makit-Client
 	}
 }
 ```
+
+The `X-Forwarded-For` line is what any proxy does when it forwards a request: the chain as received, plus the
+address it got the request from (Caddy alone would replace the chain unless it trusts that address; nginx's snippet
+uses `$proxy_add_x_forwarded_for`). makit needs nothing else from the proxy — no header of its own.
+
+makit answers with `X-Makit-Client` (the visitor it judged) and `X-Makit-Verdict`. They tell your infrastructure the
+request went through makit and what it found; whether they reach the app is the proxy's choice (`copy_headers` above,
+`auth_request_set` in nginx). makit promises nothing about the headers your app sees: when Caddy or nginx is the outer
+layer, only they set them. A header listed in `copy_headers` is replaced by makit's answer, so a value the visitor sent
+never reaches the app under that name.
 
 Caddy in Docker cannot reach the host's 127.0.0.1: set `admin: 172.17.0.1:9180` (the host's bridge address) in
 `/etc/makit/shield.yaml` and use that address in the snippet (`makit shield snippet caddy --addr 172.17.0.1:9180`).
@@ -61,27 +70,26 @@ after March 2026): prefer Envoy Gateway. Contour asks over gRPC only, which maki
 In Kubernetes the admin address listens on the pod's address (`admin: 0.0.0.0:9180`); `/check`, `/status` and
 `/metrics` still answer only callers on private networks.
 
-## Behind Cloudflare
+## The visitor's address: behind a CDN, a load balancer, or both
 
-Behind Cloudflare every connection comes from a Cloudflare IP; the visitor's IP is in the `CF-Connecting-IP` header.
-makit uses that header **only when the connection really comes from Cloudflare** (`trusted_proxies: [cloudflare]`,
-ranges refreshed daily from cloudflare.com/ips). A direct visitor sending a fake header is judged on its own IP.
+makit reads what every proxy writes, whatever sits in front: `X-Forwarded-For` (else RFC 7239 `Forwarded`), a list
+each hop appends to — Cloudflare, CloudFront, Fastly, a DigitalOcean or AWS load balancer, HAProxy, nginx, Caddy:
+`<whatever the visitor sent>, <visitor as the first proxy saw it>, <next proxy>…`. The left part is written by the
+visitor, so makit reads the list **from the right**: it skips the addresses of your trusted proxies and takes the
+first one that is not. A visitor who sends `X-Forwarded-For: 192.0.2.10` (an allowlisted address, or a random one to
+dodge a ban) is still judged on its real address. `X-Real-IP` counts only when there is no chain, from a trusted hop.
 
-Also lock the origin so it only accepts web traffic from Cloudflare (provider firewall, or `ufw allow from <range>`),
-otherwise attackers can skip Cloudflare by hitting the server IP.
-
-## Behind a load balancer or other proxies
-
-A load balancer (AWS ALB, HAProxy, a second nginx) passes the visitor in `X-Forwarded-For`, a list every proxy
-appends to: `<whatever the visitor sent>, <visitor as the first proxy saw it>, <next proxy>…`. The left part is
-written by the visitor, so makit reads the list **from the right**: it skips the addresses of your trusted proxies and
-takes the first one that is not. A visitor who sends `X-Forwarded-For: 192.0.2.10` (an allowlisted address, or a
-random one to dodge a ban) is still judged on its real address.
+A provider's own header — `CF-Connecting-IP`, `True-Client-IP`, `Fastly-Client-IP` — is never read. Any proxy behind
+the provider passes it on as it received it: with a load balancer between Cloudflare and the server, a client that
+skips Cloudflare and sends the balancer `CF-Connecting-IP: <any address>` would choose its own address (or get that
+address banned). The chain carries the same visitor, appended by the provider itself.
 
 ```yaml
-client_ip_header: X-Forwarded-For
-trusted_proxies: [aws-alb]          # or your load balancer's subnets: [10.0.1.0/24, 10.0.2.0/24]
+trusted_proxies: [cloudflare, 10.104.0.0/20]   # Cloudflare, then the load balancer's VPC subnet
 ```
+
+Lock the origin so it only accepts web traffic from what is in front (provider firewall, or `ufw allow from <range>`):
+a visitor who reaches it directly is judged on its own address, but skips whatever the CDN does.
 
 | `trusted_proxies` | Trusts |
 | --- | --- |
@@ -94,9 +102,10 @@ Presets and CIDRs combine: `[cloudflare, aws-alb]` reads a chain Cloudflare → 
 header counts (a visitor cannot hide behind a second `X-Forwarded-For` line), and the walk stops after 16 hops.
 
 A trusted proxy is never banned automatically — a ban on it would block every visitor it carries — and
-`makit shield ban` refuses a range that overlaps one (`--force` to insist). When Traefik `forwardAuth` or
-ingress-nginx `auth-url` asks makit without an `X-Makit-Peer` header, the asking proxy's own hop is the right-most
-`X-Forwarded-For` entry. Measured cost: ~270 ns and no allocation to resolve a three-hop chain against Cloudflare
+`makit shield ban` refuses a range that overlaps one (`--force` to insist). In ask mode the asking proxy's own hop is
+the right-most `X-Forwarded-For` entry, so that proxy must append it (every snippet does; a hand-written nginx
+`auth_request` without `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` passes the visitor's header
+unchanged, and the visitor would pick its own hop). Measured cost: ~270 ns and no allocation to resolve a three-hop chain against Cloudflare
 and the VPC ranges (`go test ./shield -bench ClientIPChain`, Apple M1).
 
 ### PROXY protocol (AWS NLB, HAProxy)
@@ -384,7 +393,7 @@ It reports, with the line:
   anyone is in (`0.0.0.0/0`), a site without `match`, and anything the rules, scoring set or bot catalog reject (an
   unknown action or level);
 - **warnings** — it loads, but probably not as meant: `kernel_block` behind a load balancer, `client_ip_header`
-  without trusted proxies, `accept_proxy_protocol` with nothing trusted, an admin address reachable from outside,
+  (no longer read), `accept_proxy_protocol` with nothing trusted, an admin address reachable from outside,
   `mode: pass`, a report sent to a `makit notify` channel that does not exist.
 
 Exit status 1 when there is an error. The running gate never loads a file it cannot read (it keeps the previous

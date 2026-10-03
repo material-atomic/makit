@@ -120,7 +120,7 @@ jobs:
         run: |
           set -x
           sudo makit shield on
-          # The local proxies stand in for Cloudflare here: trust loopback so CF-Connecting-IP is used.
+          # curl stands in for the proxies in front (X-Forwarded-For: the visitor); Caddy and makit's edge see loopback: trust it.
           sudo sed -i 's#^trusted_proxies: .*#trusted_proxies: [cloudflare, 127.0.0.1/32]#; s#^kernel_block: .*#kernel_block: true#' /etc/makit/shield.yaml
           printf 'listeners:\n  - name: edge\n    listen: "127.0.0.1:8090"\n    upstream: http://127.0.0.1:8091\n' | sudo tee -a /etc/makit/shield.yaml
           sudo sed -i 's#^listeners: \[\].*##' /etc/makit/shield.yaml
@@ -150,8 +150,7 @@ jobs:
           (makit_shield) {
           	forward_auth 127.0.0.1:9180 {
           		uri /check
-          		header_up X-Makit-Peer {remote_host}
-          		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+          		header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"
           	}
           }
           :8088 {
@@ -164,21 +163,21 @@ jobs:
           code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
           sudo makit shield ban 203.0.113.9 --for 1h --reason ci && sleep 3   # the gate reloads lists within 2 s
           for port in 8088 8090; do
-            test "$(code -H 'CF-Connecting-IP: 198.51.100.20' http://127.0.0.1:$port/)" = 200
-            test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:$port/)" = 403
+            test "$(code -H 'X-Forwarded-For: 198.51.100.20' http://127.0.0.1:$port/)" = 200
+            test "$(code -H 'X-Forwarded-For: 203.0.113.9' http://127.0.0.1:$port/)" = 403
           done
-          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/.env)" = 403   # rule + auto-ban
+          test "$(code -H 'X-Forwarded-For: 198.51.100.30' http://127.0.0.1:8088/.env)" = 403   # rule + auto-ban
           sleep 1
-          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/)" = 403        # still banned
+          test "$(code -H 'X-Forwarded-For: 198.51.100.30' http://127.0.0.1:8088/)" = 403        # still banned
           sudo makit shield allow 198.51.100.30 && sleep 3
-          test "$(code -H 'CF-Connecting-IP: 198.51.100.30' http://127.0.0.1:8088/)" = 200        # allowlist wins
+          test "$(code -H 'X-Forwarded-For: 198.51.100.30' http://127.0.0.1:8088/)" = 200        # allowlist wins
           sudo nft list set inet makit_shield block4 | grep -q 203.0.113.9
           printf '# feed\n192.0.2.0/24 ; test range\n198.51.100.200\n' > /tmp/feed.txt
           sudo makit shield import /tmp/feed.txt --name ci-feed --for 1h --reason "ci feed" && sleep 3
-          test "$(code -H 'CF-Connecting-IP: 192.0.2.77' http://127.0.0.1:8088/)" = 403        # bulk list
+          test "$(code -H 'X-Forwarded-For: 192.0.2.77' http://127.0.0.1:8088/)" = 403        # bulk list
           sudo nft list set inet makit_shield list4net | grep -q 192.0.2.0/24
           # bots: a fake Googlebot is caught once reverse DNS answers; policy per category; GoesBot passes; limits
-          ua() { curl -s -o /dev/null -w '%{http_code}' -A "$1" -H "CF-Connecting-IP: $2" "http://127.0.0.1:8088${3:-/}"; }
+          ua() { curl -s -o /dev/null -w '%{http_code}' -A "$1" -H "X-Forwarded-For: $2" "http://127.0.0.1:8088${3:-/}"; }
           ua "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" 198.51.100.40 >/dev/null; sleep 4
           test "$(ua 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' 198.51.100.40)" = 403
           sudo makit shield bots set ai-crawler block
@@ -215,7 +214,7 @@ jobs:
           for i in $(seq 1 12); do grep -q 'suspicious IPs' /tmp/hook.log 2>/dev/null && break; sleep 5; done
           grep -q 'suspicious IPs' /tmp/hook.log
           sudo makit shield off && sleep 2
-          test "$(code -H 'CF-Connecting-IP: 203.0.113.9' http://127.0.0.1:8088/)" = 200          # off = pass
+          test "$(code -H 'X-Forwarded-For: 203.0.113.9' http://127.0.0.1:8088/)" = 200          # off = pass
           docker rm -f caddy
       - name: every part in place
         run: |

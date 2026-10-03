@@ -48,7 +48,6 @@ right**, skipping your trusted proxies, so the visitor's own `X-Forwarded-For` i
 
 ```yaml
 config:
-  client_ip_header: X-Forwarded-For
   trusted_proxies: [vpc]        # or the subnets of the load balancer and the gateway pods: [10.0.0.0/16]
 ```
 
@@ -57,10 +56,10 @@ config:
 | AWS ALB | `X-Forwarded-For: …, <visitor>` from the ALB's private address | `trusted_proxies: [aws-alb]` or the ALB subnets |
 | AWS NLB, IP targets | the visitor's own address (client IP preservation) | nothing |
 | AWS NLB, instance targets / PROXY protocol | a PROXY v2 header | let the gateway read it (Envoy Gateway `ClientTrafficPolicy` `proxyProtocol`), or, with makit at the edge, `accept_proxy_protocol: true` |
-| Cloudflare → ALB | `CF-Connecting-IP` and the chain | `trusted_proxies: [cloudflare, aws-alb]` |
+| Cloudflare → ALB | `X-Forwarded-For: …, <visitor>, <Cloudflare>` from the ALB | `trusted_proxies: [cloudflare, aws-alb]` |
 
 Trust only what can reach makit: anything in `trusted_proxies` may name its own client. Narrow `vpc` to the load
-balancer's and gateway's subnets when other workloads share the VPC. [More on the walk from the right.](shield.md#behind-a-load-balancer-or-other-proxies)
+balancer's and gateway's subnets when other workloads share the VPC. [More on the walk from the right.](shield.md#the-visitors-address-behind-a-cdn-a-load-balancer-or-both)
 
 ## Replicas share one shield
 

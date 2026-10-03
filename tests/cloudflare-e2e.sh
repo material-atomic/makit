@@ -13,7 +13,7 @@
 #   the visitor's address is the one Cloudflare names, and the app receives it;
 #   a probe on the blocking site is stopped and banned; on the observing site it is only logged;
 #   a fake Googlebot is caught (it does not come from Google's ranges);
-#   a client that skips Cloudflare and forges CF-Connecting-IP is judged on its real address.
+#   a client that skips Cloudflare and forges CF-Connecting-IP and X-Forwarded-For is judged on its real address.
 # SKIP_INIT=1 when makit init already ran on the server; KEEP=1 leaves the setup in place.
 # shellcheck disable=SC2016,SC2015  # $ in single quotes expands on the server; ok() cannot fail
 set -euo pipefail
@@ -34,7 +34,6 @@ mode: observe
 ask: true
 admin: 172.17.0.1:9180
 trusted_proxies: [cloudflare]
-client_ip_header: CF-Connecting-IP
 ban_scope: server
 bots:
   policy: { spoofed: block }
@@ -55,8 +54,7 @@ on 'mkdir -p /srv/origin && cat > /srv/origin/Caddyfile' <<'CADDY'
 (shield_on) {
 	forward_auth 172.17.0.1:9180 {
 		uri /check
-		header_up X-Makit-Peer {remote_host}
-		header_up X-Makit-Client {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For "{http.request.header.X-Forwarded-For}, {remote_host}"
 		copy_headers X-Makit-Client
 	}
 }
@@ -110,12 +108,13 @@ code=$(visit admin.example.com 203.0.113.78 / "${googlebot[@]}")
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.3; code=$(visit admin.example.com 203.0.113.78 / "${googlebot[@]}"); [[ $code == 403 ]] && break; done
 [[ $code == 403 ]] && ok "once reverse DNS says it is not Google: blocked as spoofed ($(last_log | grep -o 'bot:spoofed' | head -1))" || fail "fake Googlebot after DNS: $code ($(last_log))"
 
-step "skipping Cloudflare: straight to the origin with a forged CF-Connecting-IP"
+step "skipping Cloudflare: straight to the origin with a forged CF-Connecting-IP and X-Forwarded-For"
 code=$(docker run --rm --network terrarium-internet curlimages/curl:8.10.1 -s -o /dev/null -w '%{http_code}' \
-  -H 'Host: admin.example.com' -H 'CF-Connecting-IP: 66.249.66.1' http://linux-server.internet/.git/config)
+  -H 'Host: admin.example.com' -H 'CF-Connecting-IP: 66.249.66.1' -H 'X-Forwarded-For: 66.249.66.1, 172.64.0.10' \
+  http://linux-server.internet/.git/config)
 line=$(last_log)
 [[ $code == 403 ]] && ok "blocked: $code" || fail "the forged request answered $code"
-grep -q '66.249.66.1' <<<"$line" && fail "makit believed the forged CF-Connecting-IP: $line"
+grep -q '66.249.66.1' <<<"$line" && fail "makit believed the forged headers: $line"
 grep -q '172.72.' <<<"$line" && ok "judged on its real address, not 66.249.66.1: $(tr -s ' ' <<<"$line" | cut -c1-110)" || fail "log: $line"
 
 on 'makit shield unban 203.0.113.9; makit shield unban 203.0.113.78' >/dev/null 2>&1 || true
