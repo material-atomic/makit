@@ -122,6 +122,28 @@ func TestVerifyRDNSAndRanges(t *testing.T) {
 	if got := v.Check(byID["gptbot"], netip.MustParseAddr("198.51.100.7"), now); got != "spoofed" {
 		t.Errorf("gptbot outside ranges: %s", got)
 	}
+	// Ranges and reverse DNS (Googlebot): outside Google's ranges, a reverse zone that never answers does not rescue
+	// the address — the attacker runs that zone. Spoofed, and asked again in 10 minutes, not kept for a day.
+	os.WriteFile(filepath.Join(botsDir(), feedFile("googlebot", "https://developers.google.com/static/search/apis/ipranges/googlebot.json")),
+		[]byte("# test\n66.249.64.0/19\n"), 0o644)
+	v.LoadRanges(bc)
+	vr := f.verifier()
+	vr.LoadRanges(bc)
+	if got := vr.Check(byID["googlebot"], netip.MustParseAddr("203.0.113.12"), now); got != "spoofed" {
+		t.Errorf("googlebot outside its ranges, DNS timing out: %s, want spoofed", got)
+	}
+	f.err["203.0.113.12"] = nil
+	f.ptr["203.0.113.12"] = []string{"crawl-203-0-113-12.googlebot.com."}
+	f.fwd["crawl-203-0-113-12.googlebot.com"] = []net.IP{net.ParseIP("203.0.113.12")}
+	if got := vr.Check(byID["googlebot"], netip.MustParseAddr("203.0.113.12"), now.Add(5*time.Minute)); got != "spoofed" {
+		t.Errorf("within 10 minutes the verdict is kept: %s", got)
+	}
+	if got := vr.Check(byID["googlebot"], netip.MustParseAddr("203.0.113.12"), now.Add(11*time.Minute)); got != "verified" {
+		t.Errorf("a new Google address, once its DNS answers: %s, want verified", got)
+	}
+	if got := vr.Check(byID["googlebot"], netip.MustParseAddr("66.249.70.1"), now); got != "verified" {
+		t.Errorf("googlebot inside its ranges: %s", got)
+	}
 	// Async mode never blocks the request: first answer is pending, the next one has the result.
 	va := f.verifier()
 	va.Sync = false

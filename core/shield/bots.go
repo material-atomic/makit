@@ -314,8 +314,9 @@ type Bot struct {
 // ── verification ──
 
 type verdict struct {
-	status string
-	at     time.Time
+	status  string
+	at      time.Time
+	recheck bool // DNS gave no answer: asked again after 10 minutes, not 24 hours
 }
 
 // Verifier checks claimed identities: published IP ranges first, then forward-confirmed reverse DNS. DNS runs in the
@@ -415,21 +416,22 @@ func (v *Verifier) Check(a *Agent, ip netip.Addr, now time.Time) string {
 	}
 	key := a.ID + "|" + ip.String()
 	v.mu.Lock()
-	if c, ok := v.cache[key]; ok && (c.status != "unknown" && now.Sub(c.at) < 24*time.Hour || now.Sub(c.at) < 10*time.Minute) {
+	if c, ok := v.cache[key]; ok && (!c.recheck && now.Sub(c.at) < 24*time.Hour || now.Sub(c.at) < 10*time.Minute) {
 		v.mu.Unlock()
 		return c.status
 	}
+	ranged := rs != nil
 	if v.Sync {
 		v.mu.Unlock()
-		st := v.rdns(a, ip)
-		v.store(key, st, now)
+		st, recheck := v.settle(a, ip, ranged)
+		v.store(key, verdict{st, now, recheck})
 		return st
 	}
 	if !v.inflight[key] && len(v.inflight) < 256 {
 		v.inflight[key] = true
 		go func() {
-			st := v.rdns(a, ip)
-			v.store(key, st, time.Now())
+			st, recheck := v.settle(a, ip, ranged)
+			v.store(key, verdict{st, time.Now(), recheck})
 			v.mu.Lock()
 			delete(v.inflight, key)
 			v.mu.Unlock()
@@ -439,17 +441,32 @@ func (v *Verifier) Check(a *Agent, ip netip.Addr, now time.Time) string {
 	return "pending"
 }
 
-func (v *Verifier) store(key, st string, at time.Time) {
+// settle runs the DNS check. Reverse DNS only rescues an address outside the operator's published ranges (a list a
+// day old may miss a new one); when DNS gives no answer — a timeout, SERVFAIL, the resolver down — nothing rescues
+// it and the ranges' answer stands: spoofed. Otherwise a fake Googlebot whose own reverse zone never answers (its
+// operator chooses that) would stay "unknown" and pass the spoofed policy. Either way it is asked again in 10 minutes.
+func (v *Verifier) settle(a *Agent, ip netip.Addr, ranged bool) (string, bool) {
+	st := v.rdns(a, ip)
+	if st != "unknown" {
+		return st, false
+	}
+	if ranged && v.LookupAddr != nil {
+		return "spoofed", true
+	}
+	return st, true
+}
+
+func (v *Verifier) store(key string, vd verdict) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if len(v.cache) > 100000 {
 		for k, c := range v.cache {
-			if at.Sub(c.at) > time.Hour {
+			if vd.at.Sub(c.at) > time.Hour {
 				delete(v.cache, k)
 			}
 		}
 	}
-	v.cache[key] = verdict{st, at}
+	v.cache[key] = vd
 }
 
 // rdns: the PTR name must end in an operator domain and resolve back to the same IP.

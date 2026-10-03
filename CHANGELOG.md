@@ -11,6 +11,10 @@
   that wrote it, and `install.sh` — what `makit upgrade` runs — restarts a running gate on the new version after
   checking its config with the new binary (a config the new version refuses leaves the old gate running). New:
   `makit shield restart`.
+- A fake Googlebot (Bingbot, Applebot: any crawler with published ranges and reverse DNS) can no longer slip past
+  `bots.policy.spoofed` by making its own reverse DNS fail. Outside the operator's ranges, reverse DNS only rescues a
+  new address; a timeout or SERVFAIL — its operator's choice — left it "unknown" for 10 minutes, never spoofed. It is
+  now spoofed, and asked again after 10 minutes (not 24 hours) so a real crawler whose DNS was briefly down recovers.
 - `makit shield status` and `makit top` never send the admin address's requests through `http_proxy`. A non-JSON
   answer is reported with its HTTP status and first line, and the gate's refusal names the address it refused.
 - `tests/server-e2e.sh`: a fresh VPS end to end (terrarium's linux-server: systemd, Docker inside, eth0 with the public
