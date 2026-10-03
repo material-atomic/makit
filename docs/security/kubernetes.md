@@ -65,14 +65,42 @@ balancer's and gateway's subnets when other workloads share the VPC. [More on th
 ## Replicas share one shield
 
 Requests from one visitor land on any replica. The chart turns on `cluster:`: replicas send each other their bans,
-allow entries, rate-limit counts and scores every second, so an IP banned by one pod is banned by all, `limit 60/1m`
+allow entries, rate-limit counts and scores four times a second, so an IP banned by one pod is banned by all, `limit 60/1m`
 holds for the whole cluster, and a scan spread over pods escalates as on one — while every decision is still made
 from local memory, never waiting on the network. Messages are signed with the shared secret; forged and replayed ones
 are refused. [How it works and what it costs.](shield.md#several-replicas-behind-one-load-balancer)
 
 Measured on a kind cluster with 3 replicas (`tests/k8s-e2e.sh`): a ban made with the CLI on one pod and an automatic
 ban from a probe on another are enforced by all three within seconds; with `limit 10/1m` and 30 requests spread over
-the 3 replicas, 11 got through with `cluster:` on and 27 with it off.
+the 3 replicas, 11 got through with `cluster:` on (`sync: 1s`) and 27 with it off.
+
+## Stop bans at the load balancer: AWS WAF
+
+With `aws_waf:`, makit keeps an AWS WAF IP set equal to its live bans; a rule in the web ACL on the ALB (or CloudFront)
+blocks those addresses before they reach the cluster at all — no gateway hop, no pod, no `/check`.
+
+```yaml
+config:
+  aws_waf:
+    region: us-east-2
+    scope: REGIONAL                  # ALB, API Gateway; CLOUDFRONT for CloudFront (us-east-1)
+    ipv4: { name: makit-bans-v4, id: 1a2b3c4d-… }
+    ipv6: { name: makit-bans-v6, id: 5e6f7a8b-… }   # optional
+    every: 30s
+```
+
+1. Create the IP sets (`aws wafv2 create-ip-set --name makit-bans-v4 --scope REGIONAL --ip-address-version IPV4
+   --addresses []`, and the same with `IPV6`) and a **block** rule in your web ACL that references them — after any
+   rule that allows your own traffic.
+2. Give the makit pods `wafv2:GetIPSet` and `wafv2:UpdateIPSet` on those two IP sets only (EKS Pod Identity or IRSA on
+   the chart's ServiceAccount; any credential the AWS SDK finds works).
+3. `makit shield waf sync --dry-run` shows what would change; the gate then syncs every 30 seconds.
+
+makit writes only those IP sets and only when they differ; one replica writes (the cluster agrees which). Never
+pushed: a range that overlaps an allow entry or a trusted proxy — at the edge that would block every visitor behind
+it — bans for one site only (a web ACL covers every site), and ranges wider than /8 (IPv4) or /32 (IPv6). An IP set
+holds at most 10,000 addresses: beyond that the newest bans win, and `waf sync` says how many were left out. Expired
+bans leave the IP set at the next sync. `/metrics` has the addresses in each set and the failed syncs.
 
 ## Config changes
 

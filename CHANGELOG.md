@@ -51,6 +51,12 @@
 - `makit shield analyze` and `config check --replay` read AWS ALB access logs (`--format alb` or detected), `.gz` files
   and directories of them, as S3 delivers them. Logs that keep only the User-Agent (ALB, nginx) no longer get
   header-based bot signals in replay — a browser was scored for headers the log never had.
+- `makit shield` pushes its live bans to AWS WAF IP sets (`aws_waf:`, every 30 s, `makit shield waf sync [--dry-run]`),
+  so the ALB or CloudFront drops that traffic first. Only the named IP sets are written, only when they differ, by one
+  replica of a cluster; never a range overlapping an allow entry or a trusted proxy, site-only bans, or ranges wider
+  than /8 / /32; beyond 10,000 addresses the newest bans win. Credentials from the AWS chain (EKS Pod Identity, IRSA,
+  instance role); the chart has a ServiceAccount to annotate.
+- Cluster sync every 250 ms by default (was 1 s): between two syncs a limit can be exceeded by about rate × interval.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

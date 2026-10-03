@@ -63,6 +63,8 @@ type Config struct {
 	Sites    []SiteConfig `yaml:"sites"` // per-domain settings over the global ones above
 	// Cluster: replicas behind a load balancer share bans, allow entries, rate limits and scores.
 	Cluster ClusterConfig `yaml:"cluster"`
+	// AWSWAF: the live bans pushed to AWS WAF IP sets, so the load balancer drops that traffic first.
+	AWSWAF AWSWAFConfig `yaml:"aws_waf"`
 }
 
 // SiteConfig is one site (domain) with what differs from the global settings: single values replace them, maps

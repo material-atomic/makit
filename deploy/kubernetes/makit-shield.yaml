@@ -51,6 +51,19 @@ spec:
 
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: makit-makit-shield
+  labels:
+    app.kubernetes.io/name: makit-shield
+    app.kubernetes.io/instance: makit
+    app.kubernetes.io/version: "0.6.0"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: makit-shield-0.6.0
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: makit-makit-shield
@@ -69,7 +82,7 @@ data:
       listen: :9181
       peers:
       - dns:makit-makit-shield-headless.makit.svc.cluster.local:9181
-      sync: 1s
+      sync: 250ms
     mode: observe
     report:
       every: 5m
@@ -140,9 +153,10 @@ spec:
         app.kubernetes.io/instance: makit
       annotations:
         # cluster: is read at start: a change restarts the pods. The rest of shield.yaml is reloaded live.
-        checksum/cluster: 94650e2c48ac8695
+        checksum/cluster: fd7f57234c22f84f
     spec:
-      automountServiceAccountToken: false
+      serviceAccountName: makit-makit-shield
+      automountServiceAccountToken: false   # makit never talks to the Kubernetes API (IRSA uses its own projected token)
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

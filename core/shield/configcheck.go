@@ -343,6 +343,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 	}
 	c.listeners(cfg, opt, len(trusted) > 0)
 	c.cluster(cfg.Cluster)
+	c.awsWAF(cfg.AWSWAF)
 	c.report(cfg.Report.Every, cfg.Report.MinLevel, "report")
 	if opt.Channels != nil {
 		known := map[string]bool{}
@@ -414,6 +415,33 @@ func (c *checker) cluster(cl ClusterConfig) {
 	}
 	if _, err := cl.secret(); err != nil {
 		c.add("warning", c.line("cluster"), "cluster", err.Error()+" — the gate will not start without it")
+	}
+}
+
+func (c *checker) awsWAF(w AWSWAFConfig) {
+	if !w.Enabled() && w.IPv4.Name == "" && w.IPv6.Name == "" {
+		return
+	}
+	switch strings.ToUpper(w.Scope) {
+	case "", "REGIONAL", "CLOUDFRONT":
+	default:
+		c.add("error", c.line("aws_waf", "scope"), "scope", "aws_waf scope must be REGIONAL (ALB, API Gateway) or CLOUDFRONT")
+	}
+	if strings.EqualFold(w.Scope, "CLOUDFRONT") && w.Region != "" && w.Region != "us-east-1" {
+		c.add("error", c.line("aws_waf", "region"), "region", "aws_waf: CLOUDFRONT IP sets live in us-east-1")
+	}
+	for name, s := range map[string]AWSWAFIPSet{"ipv4": w.IPv4, "ipv6": w.IPv6} {
+		if (s.Name == "") != (s.ID == "") {
+			c.add("error", c.line("aws_waf", name), name, fmt.Sprintf("aws_waf %s needs both name and id (aws wafv2 list-ip-sets)", name))
+		}
+	}
+	if w.Every != "" {
+		if d, err := time.ParseDuration(w.Every); err != nil || d < 10*time.Second {
+			c.add("error", c.line("aws_waf", "every"), "every", fmt.Sprintf("aws_waf every %q: a duration of 10s or more", w.Every))
+		}
+	}
+	if w.Max < 0 || w.Max > 10000 {
+		c.add("error", c.line("aws_waf", "max"), "max", "aws_waf max: 1 to 10000 (an AWS WAF IP set holds at most 10,000 addresses)")
 	}
 }
 

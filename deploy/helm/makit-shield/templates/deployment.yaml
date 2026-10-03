@@ -15,7 +15,10 @@ spec:
         checksum/cluster: {{ toJson .Values.cluster | sha256sum | trunc 16 }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
     spec:
-      automountServiceAccountToken: false
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "makit.fullname" . }}
+      {{- end }}
+      automountServiceAccountToken: false   # makit never talks to the Kubernetes API (IRSA uses its own projected token)
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

@@ -46,6 +46,7 @@ type Gate struct {
 	metrics *gateMetrics // /metrics (nil in tests that do not need it)
 
 	cluster   *Cluster    // other replicas (nil: a single server)
+	waf       *WAFSync    // bans pushed to AWS WAF (nil: off)
 	remoteOps []ClusterOp // list changes from other replicas, persisted with the next ban batch (banMu)
 }
 

@@ -264,6 +264,18 @@ func (g *Gate) metricsHandler(cfg func() *Config) http.Handler {
 			p.sample("makit_shield_cluster_messages_total", float64(cl.refused.Load()), "result", "refused")
 		}
 
+		if w := g.waf; w != nil {
+			p.head("makit_shield_aws_waf_addresses", "gauge", "Addresses makit keeps in the AWS WAF IP sets, by family.")
+			p.head("makit_shield_aws_waf_last_sync_timestamp_seconds", "gauge", "The last sync with AWS WAF (successful or not).")
+			if st := w.Status(); st != nil {
+				p.sample("makit_shield_aws_waf_addresses", float64(st.V4), "family", "ipv4")
+				p.sample("makit_shield_aws_waf_addresses", float64(st.V6), "family", "ipv6")
+				p.sample("makit_shield_aws_waf_last_sync_timestamp_seconds", float64(st.At.Unix()))
+			}
+			p.head("makit_shield_aws_waf_errors_total", "counter", "Syncs with AWS WAF that failed.")
+			p.sample("makit_shield_aws_waf_errors_total", float64(w.errors.Load()))
+		}
+
 		samples := []metrics.Sample{{Name: "/sched/goroutines:goroutines"}, {Name: "/memory/classes/heap/objects:bytes"},
 			{Name: "/memory/classes/total:bytes"}}
 		metrics.Read(samples)

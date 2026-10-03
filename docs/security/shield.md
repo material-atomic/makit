@@ -134,13 +134,15 @@ cluster:
   listen: ":9181"                                   # inside the cluster only
   peers: ["dns:makit-shield-headless.makit.svc.cluster.local:9181"]   # or host:port, one per replica
   # secret: MAKIT_CLUSTER_SECRET in the environment (a Kubernetes Secret), or secret_file: /etc/makit/cluster.key
-  sync: 1s
+  sync: 250ms
 ```
 
 - **Bans, unbans and allow entries** — automatic ones and those made with `makit shield ban/allow` on any replica —
   reach every replica within about one sync interval (≈0.4 s in tests with `sync: 100ms`).
 - **Rate limits** count across replicas: windows are aligned on the clock, and each replica adds the others' counts to
-  its own, so `limit 60/1m` stays 60 a minute for the whole cluster, give or take one sync interval of requests.
+  its own, so `limit 60/1m` stays 60 a minute for the whole cluster. Between two syncs a replica does not see the
+  others' requests yet, so a burst can get about (request rate × sync interval) more through: at 10 requests a second
+  and the default 250 ms, two or three.
 - **Request scores** add up across replicas (suspicious requests, bursts), so a scan spread over the pods escalates
   and is banned as if it hit one.
 - A replica that starts copies the bans and allow entries of a running one first.

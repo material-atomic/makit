@@ -28,7 +28,7 @@ import (
 // the background, once per sync interval, each replica sends the others what changed here: bans, unbans and allow
 // entries, and the requests counted against each rate limit and scoring window. The others add them in, so behind N
 // replicas a limit of 60 a minute stays 60 (not 60 × N), a scan spread across pods escalates as if it hit one, and an
-// IP banned by one pod is banned by all within about a second. A new replica first copies the bans of a running one.
+// IP banned by one pod is banned by all within a fraction of a second. A new replica first copies the bans of a running one.
 //
 // Every message is signed with a shared secret (HMAC-SHA256) over its time and body, and carries the sender's
 // sequence number: a forged or replayed message — which could inflate a count and get a visitor banned — is refused.
@@ -38,7 +38,7 @@ type ClusterConfig struct {
 	Listen     string   `yaml:"listen"`      // where replicas reach this one, e.g. ":9181" (keep it inside the cluster)
 	Peers      []string `yaml:"peers"`       // host:port, or dns:NAME:PORT for every address of a name (a headless Service)
 	SecretFile string   `yaml:"secret_file"` // the shared key; or MAKIT_CLUSTER_SECRET in the environment
-	Sync       string   `yaml:"sync"`        // how often changes are sent (default 1s)
+	Sync       string   `yaml:"sync"`        // how often changes are sent (default 250ms)
 }
 
 func (c ClusterConfig) Enabled() bool { return c.Listen != "" && len(c.Peers) > 0 }
@@ -63,7 +63,9 @@ func (c ClusterConfig) interval() time.Duration {
 	if d, err := time.ParseDuration(c.Sync); err == nil && d >= 100*time.Millisecond {
 		return d
 	}
-	return time.Second
+	// Between two syncs a replica does not see the others' requests: a limit can be exceeded by about
+	// rate × interval. 250 ms keeps that small; the messages carry only what changed.
+	return 250 * time.Millisecond
 }
 
 // ClusterOp is a change of the block or allow list.
@@ -97,9 +99,10 @@ type Cluster struct {
 	mu       sync.Mutex
 	ops      []ClusterOp
 	peers    map[string]*peerState
-	self     map[string]bool   // addresses that turned out to be this replica
-	lastSeq  map[string]uint64 // per sending node: replays are refused
-	known    map[string]Entry  // block/allow entries at the last state load, to see what the CLI changed
+	self     map[string]bool      // addresses that turned out to be this replica
+	lastSeq  map[string]uint64    // per sending node: replays are refused
+	seen     map[string]time.Time // when each node last reached this one
+	known    map[string]Entry     // block/allow entries at the last state load, to see what the CLI changed
 	remote   map[string]time.Time
 	baseline bool
 	pulled   bool // the bans of a running replica are copied (or there was none to copy from)
@@ -119,7 +122,7 @@ func NewCluster(g *Gate, cfg ClusterConfig) (*Cluster, error) {
 	host, _ := os.Hostname()
 	c := &Cluster{g: g, cfg: cfg, secret: secret, node: host + "-" + hex.EncodeToString(id),
 		client: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConnsPerHost: 4}},
-		peers:  map[string]*peerState{}, self: map[string]bool{}, lastSeq: map[string]uint64{}, known: map[string]Entry{},
+		peers:  map[string]*peerState{}, self: map[string]bool{}, lastSeq: map[string]uint64{}, seen: map[string]time.Time{}, known: map[string]Entry{},
 		remote: map[string]time.Time{}}
 	// Sequence numbers survive a restart without being stored: they start from the clock.
 	c.seq.Store(uint64(time.Now().UnixNano()))
@@ -413,6 +416,7 @@ func (c *Cluster) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.lastSeq[b.Node] = b.Seq
+	c.seen[b.Node] = time.Now()
 	c.mu.Unlock()
 	c.apply(b)
 	c.recvd.Add(1)
@@ -544,6 +548,19 @@ func (c *Cluster) pullState() {
 		log.Printf("shield: cluster: copied %d bans and %d allow entries from %s", len(st.Block), len(st.Allow), addr)
 		return
 	}
+}
+
+// Leader tells whether this replica does what only one should (push bans to AWS WAF): the one whose node name sorts
+// first among itself and the replicas heard from in the last 30 s (every replica sends a heartbeat every 10 s).
+func (c *Cluster) Leader() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for n, t := range c.seen {
+		if time.Since(t) < 30*time.Second && n < c.node {
+			return false
+		}
+	}
+	return true
 }
 
 // PeerStatus is one peer for /metrics and makit shield status.

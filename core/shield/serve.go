@@ -481,6 +481,12 @@ func Serve(cfgPath string, dirs []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go g.banWriter(ctx)
+	if cfg.AWSWAF.Enabled() { // aws_waf: is read at start, like cluster:
+		if g.waf, err = NewWAFSync(ctx, cfg.AWSWAF); err != nil {
+			return err
+		}
+		go g.wafLoop(ctx, g.waf)
+	}
 	if g.cluster != nil {
 		go func() {
 			if err := g.cluster.Run(ctx); err != nil {

@@ -24,7 +24,7 @@ config:
 cluster:
   enabled: true
   port: 9181
-  sync: 1s
+  sync: 250ms           # a limit can be exceeded by about (request rate × sync) between two syncs
   # A Secret with key "secret" (at least 32 characters). Empty: the chart creates one and keeps it across upgrades.
   existingSecret: ""
 
@@ -36,6 +36,11 @@ notify:
 # bundled catalog).
 catalog:
   existingConfigMap: ""
+
+# The pods' ServiceAccount: annotate it for IRSA (eks.amazonaws.com/role-arn) when aws_waf: pushes bans to AWS WAF.
+serviceAccount:
+  create: true
+  annotations: {}
 
 service:
   type: ClusterIP
