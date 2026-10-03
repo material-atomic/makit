@@ -94,7 +94,7 @@ fi
 
 if [[ $mode == http || $mode == all ]]; then
   echo "▸ building makit-core and the load generator…"
-  go_run "cd core && go build -trimpath -o /repo/benchmark/.bin/makit-core . && cd ../benchmark/load && go build -trimpath -o ../.bin/load ."
+  go_run "cd core && go build -buildvcs=false -trimpath -o /repo/benchmark/.bin/makit-core . && cd ../benchmark/load && go build -buildvcs=false -trimpath -o ../.bin/load ."
   compose=(docker compose -f "$here/compose.yaml")
   cleanup() { "${compose[@]}" --profile load down -v --remove-orphans >/dev/null 2>&1 || true; }
   trap cleanup EXIT
