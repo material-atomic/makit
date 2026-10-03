@@ -83,11 +83,13 @@ allowed=$(grep -o '200' <<<"$codes" | wc -l | tr -d ' ')
 limited=$(grep -o '429' <<<"$codes" | wc -l | tr -d ' ')
 echo "  limit 10/1m, 30 requests round-robin over ${#pods[@]} replicas at ~10/s: $allowed let through, $limited limited (429)"
 echo "  ($codes)"
-# The claim is a ceiling: the cluster lets through about the limit, not the limit per replica (30 here). Between two
-# syncs (250 ms) a replica does not see the others' requests yet, so ~3 more may pass at ~10 requests/s. Fewer than
-# 10 is fine. Requests carry X-Forwarded-Host as a gateway sends it: a script calling a bare IP scores as a scanner
-# (host-ip-literal), escalates across the replicas and is banned before the limit matters.
-check "at most the limit plus one sync interval (≤ 15), not 30" 1 "$(( allowed <= 15 && limited >= 10 ))"
+# The claim is a ceiling: the cluster lets through about the limit, not the limit per replica (30 here). A replica
+# sees the others' requests one sync (250 ms) plus the time the counts take to travel later, so (request rate × that
+# delay) more may pass: ~3 on a quiet machine, 6 measured on a loaded CI runner (kind, 3 replicas, kubectl exec). The
+# bound is twice the limit — still far from 30. Fewer than 10 is fine. Requests carry X-Forwarded-Host as a gateway
+# sends it: a script calling a bare IP scores as a scanner (host-ip-literal), escalates across the replicas and is
+# banned before the limit matters.
+check "about the limit across the cluster (≤ 20), not the limit per replica (30)" 1 "$(( allowed <= 20 && limited >= 10 ))"
 
 if [[ $fail == 0 ]]; then echo "PASS"; exit 0; fi
 echo "FAIL — what the replicas say:"
