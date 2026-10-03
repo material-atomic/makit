@@ -57,6 +57,9 @@
   than /8 / /32; beyond 10,000 addresses the newest bans win. Credentials from the AWS chain (EKS Pod Identity, IRSA,
   instance role); the chart has a ServiceAccount to annotate.
 - Cluster sync every 250 ms by default (was 1 s): between two syncs a limit can be exceeded by about rate × interval.
+- Catalog files starting with a dot are skipped: a catalog copied from a Mac carries AppleDouble `._*.yaml` files, and one
+  of them stopped the gate with a YAML error. `makit top` says the Setup tab is tab 8 (it said 7 since the Shield tab
+  came in). `makit --help`: aligned columns, and what makit is now.
 - Bans, unbans and allow entries reach the other replicas at once instead of at the next sync: ~2 ms on average
   (was a full sync interval), batched at most every 20 ms under a flood.
 - Config playground on makit.sh (`playground.html`): presets (single site, many domains, behind Cloudflare, behind a load

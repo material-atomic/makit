@@ -18,9 +18,21 @@ func readCatalog(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// globCatalog lists catalog files, leaving out hidden ones: "._probes.yaml" is the AppleDouble shadow macOS adds when
+// a catalog is copied from a Mac (tar, scp of an archive), and loading it would stop the gate.
 func globCatalog(pattern string) ([]string, error) {
+	var files []string
+	var err error
 	if CatalogFS != nil {
-		return fs.Glob(CatalogFS, strings.TrimPrefix(filepath.ToSlash(pattern), "/"))
+		files, err = fs.Glob(CatalogFS, strings.TrimPrefix(filepath.ToSlash(pattern), "/"))
+	} else {
+		files, err = filepath.Glob(pattern)
 	}
-	return filepath.Glob(pattern)
+	out := files[:0]
+	for _, f := range files {
+		if !strings.HasPrefix(filepath.Base(f), ".") {
+			out = append(out, f)
+		}
+	}
+	return out, err
 }

@@ -411,3 +411,17 @@ func TestAutoBanBatched(t *testing.T) {
 		t.Errorf("re-ban duplicated: %d", len(st.Block))
 	}
 }
+
+// A catalog copied from a Mac carries AppleDouble "._*.yaml" files; they are not rules and must not stop the gate.
+func TestCatalogSkipsHiddenFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "http"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src, _ := os.ReadFile(filepath.Join(repoCatalog, "http", "probes.yaml"))
+	_ = os.WriteFile(filepath.Join(dir, "http", "probes.yaml"), src, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "http", "._probes.yaml"), []byte("\x00\x05\x16\x07Mac OS X\x00\x00"), 0o644)
+	if rules, err := LoadHTTPRules([]string{dir}); err != nil || len(rules) == 0 {
+		t.Errorf("rules %d, err %v", len(rules), err)
+	}
+}

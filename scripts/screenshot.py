@@ -23,6 +23,20 @@ BACKGROUNDS = {41: "#b62324", 42: "#196c2e", 43: "#9e6a03", 44: "#1f6feb"}
 SGR = re.compile(r"\x1b\[([0-9;]*)m")
 
 
+def xterm256(n):
+    """The colour of an xterm 256-colour index."""
+    base = ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+            "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#ffffff"]
+    if n < 16:
+        return base[n]
+    if n < 232:
+        n -= 16
+        steps = [0, 95, 135, 175, 215, 255]
+        return "#%02x%02x%02x" % (steps[n // 36], steps[(n // 6) % 6], steps[n % 6])
+    v = 8 + (n - 232) * 10
+    return "#%02x%02x%02x" % (v, v, v)
+
+
 def ansi_to_html(text):
     out, state, pos = [], {"bold": False, "dim": False, "fg": None, "bg": None}, 0
 
@@ -45,17 +59,36 @@ def ansi_to_html(text):
         span(text[pos:m.start()])
         pos = m.end()
         codes = [int(c) for c in m.group(1).split(";") if c] or [0]
-        for c in codes:
+        i = 0
+        while i < len(codes):
+            c = codes[i]
+            if c in (38, 48) and i + 2 < len(codes) and codes[i + 1] == 5:  # 256 colours
+                state["fg" if c == 38 else "bg"] = xterm256(codes[i + 2])
+                i += 3
+                continue
+            if c in (38, 48) and i + 4 < len(codes) and codes[i + 1] == 2:  # true colour
+                state["fg" if c == 38 else "bg"] = "#%02x%02x%02x" % tuple(codes[i + 2:i + 5])
+                i += 5
+                continue
             if c == 0:
                 state.update(bold=False, dim=False, fg=None, bg=None)
             elif c == 1:
                 state["bold"] = True
             elif c == 2:
                 state["dim"] = True
+            elif c == 22:
+                state.update(bold=False, dim=False)
+            elif c == 39:
+                state["fg"] = None
+            elif c == 49:
+                state["bg"] = None
             elif c in COLOURS:
                 state["fg"] = COLOURS[c]
             elif c in BACKGROUNDS:
                 state["bg"] = BACKGROUNDS[c]
+            elif 40 <= c <= 47 or 100 <= c <= 107:
+                state["bg"] = COLOURS.get(c - 10, None)
+            i += 1
     span(text[pos:])
     return "".join(out)
 
@@ -69,7 +102,7 @@ body {{ margin: 0; background: #0b1220; padding: 28px; display: inline-block;
 .bar i {{ width: 12px; height: 12px; border-radius: 50%; display: inline-block; }}
 .bar span {{ margin-left: 10px; }}
 pre {{ margin: 0; padding: 16px 18px 18px; color: #e6edf3; font: 13.5px/1.55 "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap; word-break: break-word; }}
+  white-space: pre; }}
 .cmd {{ color: #7ee787; }}
 </style><div class="win"><div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>{title}</span></div>
 <pre>{command}{body}</pre></div>"""
@@ -88,8 +121,14 @@ def main():
     ap.add_argument("--command", default="")
     ap.add_argument("--out", required=True)
     ap.add_argument("--width", type=int, default=980)
+    ap.add_argument("--keep-blank", action="store_true", help="keep trailing blank lines (full-screen programs)")
     a = ap.parse_args()
-    text = sys.stdin.read().rstrip("\n")
+    text = sys.stdin.read()
+    if not a.keep_blank:  # a captured terminal pane ends in empty rows and a bare prompt
+        lines_in = text.rstrip("\n").split("\n")
+        while lines_in and re.sub(r"\x1b\[[0-9;]*m", "", lines_in[-1]).strip() in ("", "$"):
+            lines_in.pop()
+        text = "\n".join(lines_in)
     command = f'<span class="cmd">$ </span>{html.escape(a.command)}\n' if a.command else ""
     page = PAGE.format(width=a.width, title=html.escape(a.title), command=command, body=ansi_to_html(text))
     lines = text.count("\n") + 2 + (1 if a.command else 0)

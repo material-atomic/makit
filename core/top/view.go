@@ -367,7 +367,7 @@ func (m *model) overview(h int) []string {
 	}
 	setupPart := sOK.Render("Setup complete")
 	if missing > 0 {
-		setupPart = sWarn.Render(fmt.Sprintf("Setup: %d missing (tab 7)", missing))
+		setupPart = sWarn.Render(fmt.Sprintf("Setup: %d missing (tab %d)", missing, int(tSetup)+1))
 	}
 	l = append(l, "", " "+dockerPart+sDim.Render("  ·  ")+svcPart+sDim.Render("  ·  ")+setupPart, "")
 
