@@ -203,6 +203,13 @@ func (g *Gate) checkHandler() http.Handler {
 		// received the request from (nginx $proxy_add_x_forwarded_for, Traefik, Envoy, Caddy's own), so that is the
 		// right-most hop; what is left of it was appended by the proxies before, or typed by the visitor.
 		peer, chain := lastHop(forwardedFor(h))
+		if old := h.Get("X-Makit-Peer"); old != "" {
+			g.oldAsk.Do(func() {
+				log.Printf("shield: a proxy sends X-Makit-Peer (%s), which makit no longer reads: the visitor is the right-most "+
+					"X-Forwarded-For entry (%s). Paste the new snippet (makit shield snippet caddy|nginx), or send the address "+
+					"it resolved as X-Forwarded-For", old, peer)
+			})
+		}
 		if chain == "" {
 			chain = h.Get("X-Real-IP")
 		}
