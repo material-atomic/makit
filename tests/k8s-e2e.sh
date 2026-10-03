@@ -7,25 +7,28 @@
 #   4. a shield.yaml change reaches the running pods without a restart;
 #   5. a rate limit holds across replicas: limit 10/1m lets about 10 of 30 requests through (27-30 without cluster).
 # Needs docker, kind, kubectl and helm. KEEP=1 keeps the cluster afterwards.
-set -euo pipefail
+set -uo pipefail  # every check runs; the end says what failed
 cd "$(dirname "$0")/.."
 name=makit-e2e ns=makit image=ghcr.io/material-atomic/makit-shield:e2e
 fail=0
 check() { # check DESCRIPTION EXPECTED ACTUAL
   if [[ $2 == "$3" ]]; then echo "  ✓ $1"; else echo "  ✗ $1: got $3, want $2"; fail=1; fi
 }
+# shellcheck disable=SC2329 # run by the EXIT trap
 cleanup() { [[ ${KEEP:-0} == 1 ]] || kind delete cluster --name "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+set -e # setting up must succeed; the checks below all run and report
 kind get clusters 2>/dev/null | grep -qx "$name" || kind create cluster --name "$name" --wait 120s
 docker build -q -f deploy/image/Dockerfile --build-arg VERSION=e2e -t "$image" . >/dev/null
 kind load docker-image "$image" --name "$name" >/dev/null
 kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 helm upgrade --install shield deploy/helm/makit-shield -n "$ns" --set image.tag=e2e --set replicaCount=3 \
-  --set config.mode=block --wait --timeout 180s >/dev/null
+  --set config.mode=block --wait --timeout 180s >/dev/null || { kubectl -n "$ns" get pods; kubectl -n "$ns" logs -l app.kubernetes.io/name=makit-shield --tail 20; exit 1; }
 kubectl -n "$ns" run c --image=curlimages/curl:8.10.1 --restart=Never --command -- sleep 3600 >/dev/null 2>&1 || true
 kubectl -n "$ns" wait --for=condition=Ready pod/c --timeout=120s >/dev/null
 sleep 3 # the replicas find each other (first sync)
+set +e
 
 # shellcheck disable=SC2207 # pod names and IPs have no spaces
 pods=($(kubectl -n "$ns" get pods -l app.kubernetes.io/name=makit-shield -o jsonpath='{.items[*].metadata.name}'))
@@ -40,7 +43,8 @@ everywhere() { local out=""; for ip in "${ips[@]}"; do out+="$(ask "$ip" "$1" "$
 all() { local out=""; for _ in "${ips[@]}"; do out+="$1 "; done; echo "${out% }"; }
 
 echo "== ${#pods[@]} replicas: ${ips[*]}"
-peers=$(kubectl -n "$ns" exec "${pods[0]}" -- makit-core shield status --json | grep -o '"addr"' | wc -l | tr -d ' ')
+status=$(kubectl -n "$ns" exec "${pods[0]}" -- makit-core shield status --json 2>&1 || true)
+peers=$(grep -o '"addr"' <<<"$status" | wc -l | tr -d ' ')
 check "each replica sees the other two" 2 "$peers"
 
 echo "== 1. a CLI ban on one replica"
@@ -79,4 +83,8 @@ allowed=$(kubectl -n "$ns" exec c -- sh -c "ok=0; i=0; for ip in $(printf '%s ' 
 echo "  limit 10/1m, 30 requests round-robin over ${#pods[@]} replicas at ~10/s: $allowed let through"
 check "about 10 (at most one sync interval over), not 30" 1 "$(( allowed >= 10 && allowed <= 13 ))"
 
-if [[ $fail == 0 ]]; then echo "PASS"; else echo "FAIL"; exit 1; fi
+if [[ $fail == 0 ]]; then echo "PASS"; exit 0; fi
+echo "FAIL — what the replicas say:"
+echo "status of ${pods[0]}: $status"
+for p in "${pods[@]}"; do echo "--- $p"; kubectl -n "$ns" logs "$p" --tail 30 2>&1 || true; done
+exit 1

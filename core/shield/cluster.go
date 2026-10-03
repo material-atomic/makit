@@ -102,6 +102,7 @@ type Cluster struct {
 	known    map[string]Entry  // block/allow entries at the last state load, to see what the CLI changed
 	remote   map[string]time.Time
 	baseline bool
+	pulled   bool // the bans of a running replica are copied (or there was none to copy from)
 	recvd    atomic.Uint64
 	refused  atomic.Uint64
 }
@@ -224,18 +225,27 @@ func (c *Cluster) Run(ctx context.Context) error {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
 	go func() { _ = srv.Serve(ln) }()
 	go func() { <-ctx.Done(); _ = srv.Close() }()
-	c.resolve()
-	c.pullState()
-	sync, resolve := time.NewTicker(c.cfg.interval()), time.NewTicker(15*time.Second)
+	// Replicas start together: the others may not be in DNS yet. Look every 2 s until there are peers, then every
+	// 15 s; copy a running replica's bans as soon as one answers.
+	sync := time.NewTicker(c.cfg.interval())
 	defer sync.Stop()
-	defer resolve.Stop()
+	resolveEvery, started := 2*time.Second, time.Now()
+	next := time.Now()
 	for {
+		if !time.Now().Before(next) {
+			c.resolve()
+			if !c.pulled {
+				c.pullState()
+			}
+			if len(c.Peers()) > 0 || time.Since(started) > 2*time.Minute {
+				resolveEvery = 15 * time.Second
+			}
+			next = time.Now().Add(resolveEvery)
+		}
 		select {
 		case <-ctx.Done():
 			c.push() // the last changes, so a replica that stops does not take its bans with it
 			return nil
-		case <-resolve.C:
-			c.resolve()
 		case <-sync.C:
 			c.push()
 		}
@@ -530,6 +540,7 @@ func (c *Cluster) pullState() {
 			ops = append(ops, ClusterOp{Op: "allow", Entry: e})
 		}
 		c.apply(clusterBatch{Ops: ops})
+		c.pulled = true
 		log.Printf("shield: cluster: copied %d bans and %d allow entries from %s", len(st.Block), len(st.Allow), addr)
 		return
 	}
