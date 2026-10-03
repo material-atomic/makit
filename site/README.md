@@ -15,7 +15,7 @@ Where the browser has WebMCP (`document.modelContext`; Chrome 154 with the "WebM
 and `makit_export_shield_config`. They run in the page like the buttons do — nothing is sent anywhere — and a note under
 the title says so only when they registered. Elsewhere the page is unchanged.
 
-Also kept here, as uploaded to makit.sh: `css/style.css` (the whole site, dark only) and `js/shots.js` (the 3D carousel
+Also kept here, as uploaded to makit.sh: `index.html` (the home page), `css/style.css` (the whole site, dark only) and `js/shots.js` (the 3D carousel
 of terminal captures on the home page; the images come from `docs/img/terminal/web/` through jsDelivr).
 
 Try it locally: `scripts/playground.sh`, copy `dist/playground/` to `site/playground/` with the site's `css/style.css`
