@@ -23,6 +23,10 @@
   log through the current and the new config and lists what changes, by rule, with likely false positives (a browser
   the app answered 2xx/3xx) first; nothing is written. `makit shield edit` saves only a file that passes; the gate
   logs the warnings when it reloads.
+- `makit shield`: `/metrics` (Prometheus: decisions by site, verdict and rule, a decision-latency histogram, bans by cause,
+  events, set sizes, reloads, Go memory), `/healthz` and `/readyz` on the admin address. ~32 ns per request, no
+  allocation, striped counters (same cost on 1 and 8 cores). `/status` reads the config in force (it raced with
+  reloads before).
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/material-atomic/makit/core/notify"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/material-atomic/makit/core/notify"
 )
 
 // Version is shown in /status.
@@ -226,6 +228,7 @@ func (g *Gate) checkHandler() http.Handler {
 			return
 		}
 		d := g.policy.Load().Decide(q)
+		g.metrics.observe(d.Site, d, time.Since(q.Received))
 		g.count(d.Verdict)
 		snap := Snapshot{Time: q.Received, Listener: "check", Decision: d, Method: method, Host: host, URI: uri, UA: q.UA,
 			Referer: q.Referer, Country: q.Country, Ray: q.Ray}
@@ -281,7 +284,7 @@ func Serve(cfgPath string, dirs []string) error {
 	if err != nil {
 		return err
 	}
-	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}}
+	g := &Gate{rec: rec, header: cfg.ClientHeader, stats: map[string]int64{}, metrics: newGateMetrics()}
 	// Batch reports go to every channel of `makit notify` whose min_level they reach (the channel file is read at
 	// each send, so channels added later work without a restart).
 	g.send = func(title, text, level string, channels []string) { go sendNotify(title, text, level, channels) }
@@ -328,7 +331,13 @@ func Serve(cfgPath string, dirs []string) error {
 	kernelWasOn := false
 	var current atomic.Pointer[Config] // the config in force, for the report loop
 	var loadMu sync.Mutex              // reloads come from the poller, SIGHUP and feed downloads
-	load := func() error {
+	var loadPolicy func() error
+	load := func() error { // every load attempt is counted for /metrics
+		err := loadPolicy()
+		g.metrics.reloaded(err)
+		return err
+	}
+	loadPolicy = func() error {
 		loadMu.Lock()
 		defer loadMu.Unlock()
 		c, err := LoadConfig(cfgPath)
@@ -426,8 +435,13 @@ func Serve(cfgPath string, dirs []string) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/check", g.checkHandler())
+	inForce := func() *Config { return current.Load() }
+	mux.Handle("/metrics", g.metricsHandler(inForce))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
+	mux.Handle("/readyz", g.readyHandler(func() string { s, _ := edgeErr.Load().(string); return s }, inForce))
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		p := g.policy.Load()
+		cfg := current.Load() // the config in force (reloads replace it)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": Version, "mode": cfg.Mode, "ask": cfg.Ask, "edge": cfg.Edge,
 			"edge_error": edgeErr.Load(), "stats": g.Stats(),
@@ -536,6 +550,7 @@ func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason, site strin
 	if d <= 0 {
 		return
 	}
+	g.metrics.banned(source)
 	now := time.Now()
 	e := Entry{Prefix: netip.PrefixFrom(a, a.BitLen()), Until: now.Add(d), Reason: reason, Source: source, Added: now, origin: site}
 	p := g.policy.Load()

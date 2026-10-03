@@ -338,6 +338,21 @@ makit shield log --blocked
 makit shield status          # live counters: mode, switches, list sizes, requests by verdict (--json for tools)
 ```
 
+## Metrics and health
+
+The admin address (`admin:`, `127.0.0.1:9180` by default) also serves:
+
+| Path | What |
+| --- | --- |
+| `/metrics` | Prometheus text format: decisions by site, verdict and rule (`makit_shield_decisions_total`), decision latency (`makit_shield_decision_seconds` histogram), automatic bans by cause, gate events (connections dropped at accept, PROXY header errors), set sizes, config reloads and their result, Go memory and goroutines. |
+| `/healthz` | `ok` while the process answers. |
+| `/readyz` | 200 once a policy is loaded and, with `edge` on, the listeners started; 503 before — a pod that is not ready gets no traffic. |
+
+Labels come from the config and the catalog (site names, rule and bot ids), never from a request, so the number of
+series stays bounded. Counting costs ~32 ns per request with no allocation, also with 8 cores counting at once
+(counters are striped across cache lines; `go test ./shield -bench MetricsObserve -cpu 1,8`, Apple M1). Keep the
+admin address private: `makit shield config check` warns when it is not.
+
 ## Kernel layer (optional)
 
 `kernel_block: true` mirrors the block set into an nftables table (`inet makit_shield`, sets with per-entry timeouts,

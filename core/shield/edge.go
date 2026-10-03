@@ -42,6 +42,8 @@ type Gate struct {
 
 	mu    sync.Mutex
 	stats map[string]int64 // verdict → count since start
+
+	metrics *gateMetrics // /metrics (nil in tests that do not need it)
 }
 
 func (g *Gate) count(v string) {
@@ -162,6 +164,7 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 			UA: r.UserAgent(), Referer: r.Referer(), Country: r.Header.Get("CF-IPCountry"), Ray: r.Header.Get("CF-Ray"),
 			Headers: hdr, Received: start}
 		d := g.policy.Load().Decide(q)
+		g.metrics.observe(d.Site, d, time.Since(start))
 		g.count(d.Verdict)
 		snap := Snapshot{Time: start, Listener: l.Name, Decision: d, Method: q.Method, Host: q.Host, URI: q.URI, UA: q.UA,
 			Referer: q.Referer, Country: q.Country, Ray: q.Ray}

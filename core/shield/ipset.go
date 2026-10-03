@@ -164,8 +164,11 @@ func (s *Set) Remove(p netip.Prefix) bool {
 	return false
 }
 
-// Len is the number of elements (expired ones included until pruned).
+// Len is the number of elements (expired ones included until pruned); 0 for a nil set.
 func (s *Set) Len() int {
+	if s == nil {
+		return 0
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.n
