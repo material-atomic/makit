@@ -256,7 +256,8 @@ func (g *Gate) checkHandler() http.Handler {
 func privateOnly(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ap, err := netip.ParseAddrPort(r.RemoteAddr); err != nil || !(ap.Addr().Unmap().IsLoopback() || ap.Addr().Unmap().IsPrivate()) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			// Name the caller: a refusal that does not say who was refused sends people looking in the wrong place.
+			http.Error(w, "forbidden: makit-shield answers "+r.URL.Path+" only to this machine and private networks, not "+r.RemoteAddr, http.StatusForbidden)
 			return
 		}
 		h.ServeHTTP(w, r)

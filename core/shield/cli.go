@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -386,17 +387,43 @@ func cmdLog(cfgPath string, args []string) error {
 	return sc.Err()
 }
 
+// AdminClient talks to the gate's admin address. Never through a proxy: the address is on this machine or its
+// private network, and an http_proxy set for downloads would otherwise answer in the gate's place.
+func AdminClient(timeout time.Duration) *http.Client {
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil}}
+}
+
+// AdminURL is the URL of a path on the admin address; a gate listening on every address is asked on loopback.
+func AdminURL(admin, path string) string {
+	if h, p, err := net.SplitHostPort(admin); err == nil && (h == "0.0.0.0" || h == "" || h == "::") {
+		admin = net.JoinHostPort("127.0.0.1", p)
+	}
+	return "http://" + admin + path
+}
+
+// firstLine is the start of an answer that was not what we asked for, to show in an error.
+func firstLine(r io.Reader) string {
+	b, _ := io.ReadAll(io.LimitReader(r, 300))
+	line, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	if line == "" {
+		return "(empty)"
+	}
+	return line
+}
+
 func cmdStatus(cfgPath string, args []string) error {
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		return err
 	}
-	cl := &http.Client{Timeout: 3 * time.Second}
-	res, err := cl.Get("http://" + cfg.Admin + "/status")
+	res, err := AdminClient(3 * time.Second).Get(AdminURL(cfg.Admin, "/status"))
 	if err != nil {
 		return fmt.Errorf("gate not reachable on %s (is makit-shield running?): %w", cfg.Admin, err)
 	}
 	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("gate on %s answered %s: %s", cfg.Admin, res.Status, firstLine(res.Body))
+	}
 	if (len(args) > 0 && args[0] == "--json") || !term.TTY {
 		_, err = io.Copy(os.Stdout, res.Body)
 		return err

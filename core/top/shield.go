@@ -3,8 +3,6 @@ package top
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"sort"
@@ -84,12 +82,7 @@ func (m *model) loadShield() tea.Cmd {
 			return s
 		}
 		s.cfg = cfg
-		addr := cfg.Admin
-		if h, p, err := net.SplitHostPort(addr); err == nil && (h == "0.0.0.0" || h == "" || h == "::") {
-			addr = net.JoinHostPort("127.0.0.1", p)
-		}
-		cl := &http.Client{Timeout: 800 * time.Millisecond}
-		if res, err := cl.Get("http://" + addr + "/status"); err == nil {
+		if res, err := shield.AdminClient(800 * time.Millisecond).Get(shield.AdminURL(cfg.Admin, "/status")); err == nil {
 			var st gateStatus
 			if json.NewDecoder(res.Body).Decode(&st) == nil {
 				s.status = &st
