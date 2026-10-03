@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs makit on a server:
-#   curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.6.0/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.7.0/install.sh | bash
 # Env: MAKIT_VERSION (tag to install, default below), MAKIT_SHA256 (checksum of the source tarball; by default it is
 # read from the release's SHA256SUMS, which also covers the makit-core binaries). MAKIT_FROM=DIR installs the same
 # files from a directory instead of GitHub (SHA256SUMS, makit-<version>.tar.gz, makit-core-linux-<arch>) — a build
@@ -8,7 +8,7 @@
 # A running makit shield is restarted on the new version (its config checked first): an upgrade takes effect at once.
 set -euo pipefail
 
-MAKIT_VERSION=${MAKIT_VERSION:-v0.6.0}
+MAKIT_VERSION=${MAKIT_VERSION:-v0.7.0}
 MAKIT_REPO=${MAKIT_REPO:-material-atomic/makit}
 PREFIX=/opt/makit
 

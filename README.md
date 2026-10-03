@@ -23,7 +23,7 @@ Install (as root):
 curl -fsSL https://makit.sh/install.sh | sh
 ```
 
-A given version: `curl -fsSL https://makit.sh/install.sh | sh -s -- v0.6.0` (or `https://makit.sh/v0.6.0/install.sh`).
+A given version: `curl -fsSL https://makit.sh/install.sh | sh -s -- v0.7.0` (or `https://makit.sh/v0.7.0/install.sh`).
 Website and guides: [makit.sh](https://makit.sh).
 
 Set up a new server — preview first, then apply:
@@ -227,7 +227,7 @@ source and the `makit-core` binary against the release's `SHA256SUMS` before ins
 take the release's installer straight from GitHub (pinned to a tag, never `main`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.6.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/material-atomic/makit/v0.7.0/install.sh -o install.sh
 less install.sh
 bash install.sh
 ```
