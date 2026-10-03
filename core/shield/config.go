@@ -39,7 +39,7 @@ type Config struct {
 	Ask            bool       `yaml:"ask"`  // /check enforces (Caddy/nginx ask makit); off = /check always allows
 	Edge           bool       `yaml:"edge"` // makit in front: run the listeners
 	Listeners      []Listener `yaml:"listeners"`
-	TrustedProxies []string   `yaml:"trusted_proxies"` // "cloudflare" or CIDRs whose client-IP header is believed
+	TrustedProxies []string   `yaml:"trusted_proxies"` // presets (cloudflare, aws-alb, vpc, loopback) or CIDRs whose client-IP header is believed
 	ClientHeader   string     `yaml:"client_ip_header"`
 	Allow          []string   `yaml:"allow"`        // never blocked (your office, monitoring, CI)
 	KernelBlock    bool       `yaml:"kernel_block"` // also mirror the block set into nftables (ports makit does not front, floods)
@@ -176,12 +176,27 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
-// Trusted expands trusted_proxies ("cloudflare" → the cached or built-in Cloudflare ranges).
+// ProxyPresets are the trusted_proxies names besides "cloudflare". A cloud load balancer has no published address
+// range: its nodes take addresses in your own subnets, so aws-alb trusts the private ranges a VPC uses. Narrow it to
+// the load balancer's subnets (CIDRs in trusted_proxies) when other machines in the VPC could reach makit directly.
+var ProxyPresets = map[string][]string{
+	"vpc":      {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7"},
+	"aws-alb":  {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7"},
+	"loopback": {"127.0.0.0/8", "::1/128"},
+}
+
+// Trusted expands trusted_proxies: "cloudflare" → the cached or built-in Cloudflare ranges, a preset → its ranges.
 func (c *Config) Trusted() ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, t := range c.TrustedProxies {
 		if t == "cloudflare" {
 			out = append(out, CloudflareRanges()...)
+			continue
+		}
+		if ps, ok := ProxyPresets[t]; ok {
+			for _, s := range ps {
+				out = append(out, netip.MustParsePrefix(s))
+			}
 			continue
 		}
 		p, err := ParsePrefix(t)

@@ -158,7 +158,7 @@ func (g *Gate) httpHandler(l Listener) (http.Handler, error) {
 				hdr[lk] = strings.Join(v, ", ")
 			}
 		}
-		q := Request{Peer: r.RemoteAddr, Client: r.Header.Get(g.header), Method: r.Method, Host: r.Host, URI: r.RequestURI,
+		q := Request{Peer: r.RemoteAddr, Client: headerChain(r.Header, g.header), Method: r.Method, Host: r.Host, URI: r.RequestURI,
 			UA: r.UserAgent(), Referer: r.Referer(), Country: r.Header.Get("CF-IPCountry"), Ray: r.Header.Get("CF-Ray"),
 			Headers: hdr, Received: start}
 		d := g.policy.Load().Decide(q)

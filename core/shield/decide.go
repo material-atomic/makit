@@ -126,12 +126,64 @@ func (p *Policy) trusted(a netip.Addr) bool {
 
 // firstIP takes the left-most valid IP of a header value ("1.2.3.4, 5.6.7.8" or "[::1]:443").
 func firstIP(v string) (netip.Addr, bool) {
-	v = strings.TrimSpace(strings.Split(v, ",")[0])
-	if ap, err := netip.ParseAddrPort(v); err == nil {
-		return ap.Addr().Unmap(), true
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		v = v[:i]
 	}
-	a, err := netip.ParseAddr(strings.Trim(v, "[]"))
+	return parseHop(v)
+}
+
+// parseHop parses one address of a forwarding chain: "1.2.3.4", "1.2.3.4:5678", "2001:db8::1" or "[2001:db8::1]:443".
+// It picks the form before parsing, so the common case (a bare address) never builds an error value.
+func parseHop(v string) (netip.Addr, bool) {
+	v = strings.TrimSpace(v)
+	withPort := false
+	switch {
+	case strings.HasPrefix(v, "["):
+		withPort = strings.Contains(v, "]:")
+		if !withPort {
+			v = strings.TrimSuffix(v[1:], "]")
+		}
+	case strings.Count(v, ":") == 1:
+		withPort = true // IPv4 with a port; a bare IPv6 address has at least two colons
+	}
+	if withPort {
+		ap, err := netip.ParseAddrPort(v)
+		return ap.Addr().Unmap(), err == nil
+	}
+	a, err := netip.ParseAddr(v)
 	return a.Unmap(), err == nil
+}
+
+// maxHops bounds the walk through a forwarding chain: real chains are a handful of proxies long.
+const maxHops = 16
+
+// clientIP resolves the visitor behind a trusted proxy. Each proxy appends the address it received the request from,
+// so a chain such as X-Forwarded-For is read from the right: trusted proxies are skipped and the first address that
+// is not one is the visitor. Everything to its left was written by the visitor and is never believed — a client
+// cannot pick its own IP by sending the header. A single-address header (CF-Connecting-IP) is the same walk of one.
+// The header counts only when the peer itself is a trusted proxy; from anyone else the peer is the client.
+func (p *Policy) clientIP(peer netip.Addr, header string) (client netip.Addr, viaProxy bool) {
+	if header == "" || !p.trusted(peer) {
+		return peer, false
+	}
+	client = peer
+	for hops, rest := 0, header; rest != "" && hops < maxHops; hops++ {
+		hop := rest
+		if i := strings.LastIndexByte(rest, ','); i >= 0 {
+			hop, rest = rest[i+1:], rest[:i]
+		} else {
+			rest = ""
+		}
+		a, ok := parseHop(hop)
+		if !ok {
+			break // garbage written by a proxy we trust: stop at the last address it vouched for
+		}
+		client, viaProxy = a, true
+		if !p.trusted(a) {
+			break
+		}
+	}
+	return client, viaProxy
 }
 
 // Decide picks the policy of the request's site, then applies, in order: client IP resolution (header only from
@@ -150,10 +202,8 @@ func (p *Policy) decide(r Request) Decision {
 		return Decision{Allow: true, Verdict: "invalid", Reason: "no peer address (check the proxy snippet)", Peer: r.Peer}
 	}
 	client, via := peer, ""
-	if r.Client != "" && p.trusted(peer) {
-		if c, ok := firstIP(r.Client); ok {
-			client, via = c, peer.String()
-		}
+	if c, ok := p.clientIP(peer, r.Client); ok {
+		client, via = c, peer.String()
 	}
 	d := Decision{Client: client.String(), Peer: peer.String(), Via: via, Allow: true, Verdict: "allowed"}
 	if p.Pass {
@@ -187,7 +237,8 @@ func (p *Policy) decide(r Request) Decision {
 		case "block":
 			return block(rule, reason), true
 		case "ban":
-			if p.Ban != nil && !p.Observe {
+			// A trusted proxy is never banned: it carries every visitor behind it (only its own requests are blocked).
+			if p.Ban != nil && !p.Observe && !p.trusted(client) {
 				p.Ban(client, act.Dur, rule, reason, p.Site, p.SiteScoped)
 			}
 			return block(rule, reason), true
@@ -253,7 +304,7 @@ func (p *Policy) decide(r Request) Decision {
 	}
 	for _, rule := range p.Rules {
 		if rule.Match(r) {
-			if rule.BanFor > 0 && p.Ban != nil && !p.Observe {
+			if rule.BanFor > 0 && p.Ban != nil && !p.Observe && !p.trusted(client) {
 				p.Ban(client, rule.BanFor, "rule:"+rule.ID, rule.Title, p.Site, p.SiteScoped)
 			}
 			return block("rule:"+rule.ID, rule.Title)

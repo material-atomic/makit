@@ -47,6 +47,35 @@ ranges refreshed daily from cloudflare.com/ips). A direct visitor sending a fake
 Also lock the origin so it only accepts web traffic from Cloudflare (provider firewall, or `ufw allow from <range>`),
 otherwise attackers can skip Cloudflare by hitting the server IP.
 
+## Behind a load balancer or other proxies
+
+A load balancer (AWS ALB, HAProxy, a second nginx) passes the visitor in `X-Forwarded-For`, a list every proxy
+appends to: `<whatever the visitor sent>, <visitor as the first proxy saw it>, <next proxy>…`. The left part is
+written by the visitor, so makit reads the list **from the right**: it skips the addresses of your trusted proxies and
+takes the first one that is not. A visitor who sends `X-Forwarded-For: 192.0.2.10` (an allowlisted address, or a
+random one to dodge a ban) is still judged on its real address.
+
+```yaml
+client_ip_header: X-Forwarded-For
+trusted_proxies: [aws-alb]          # or your load balancer's subnets: [10.0.1.0/24, 10.0.2.0/24]
+```
+
+| `trusted_proxies` | Trusts |
+| --- | --- |
+| `cloudflare` | Cloudflare's published ranges, refreshed daily. |
+| `aws-alb`, `vpc` | The private ranges a VPC uses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7). AWS publishes no range for load balancer nodes: they take addresses in your subnets. List those subnets instead when other machines in the VPC can reach makit directly — anything trusted may name its own client. |
+| `loopback` | 127.0.0.0/8 and ::1, for a proxy on the same machine. |
+| CIDRs | Anything else, e.g. `203.0.113.0/28` for your own proxies. |
+
+Presets and CIDRs combine: `[cloudflare, aws-alb]` reads a chain Cloudflare → ALB → makit correctly. Every line of the
+header counts (a visitor cannot hide behind a second `X-Forwarded-For` line), and the walk stops after 16 hops.
+
+A trusted proxy is never banned automatically — a ban on it would block every visitor it carries — and
+`makit shield ban` refuses a range that overlaps one (`--force` to insist). When Traefik `forwardAuth` or
+ingress-nginx `auth-url` asks makit without an `X-Makit-Peer` header, the asking proxy's own hop is the right-most
+`X-Forwarded-For` entry. Measured cost: ~270 ns and no allocation to resolve a three-hop chain against Cloudflare
+and the VPC ranges (`go test ./shield -bench ClientIPChain`, Apple M1).
+
 ## The set and the allowlist
 
 ```bash

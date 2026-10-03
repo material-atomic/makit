@@ -190,8 +190,16 @@ func (g *Gate) checkHandler() http.Handler {
 		}
 		h := r.Header
 		peer := h.Get("X-Makit-Peer")
-		if peer == "" { // nginx without the header: fall back to the left-most X-Forwarded-For it set
-			peer = strings.TrimSpace(strings.Split(h.Get("X-Forwarded-For"), ",")[0])
+		chain := headerChain(h, "X-Forwarded-For")
+		if peer == "" {
+			// A proxy without the header (Traefik forwardAuth, ingress-nginx auth-url): the right-most
+			// X-Forwarded-For entry is the address the asking proxy itself received the request from. The left-most
+			// is whatever the visitor typed.
+			peer = chain
+			if i := strings.LastIndexByte(chain, ','); i >= 0 {
+				peer = chain[i+1:]
+			}
+			peer = strings.TrimSpace(peer)
 		}
 		hdr := map[string]string{}
 		for k, v := range h {
@@ -202,7 +210,7 @@ func (g *Gate) checkHandler() http.Handler {
 		method := firstNonEmpty(h.Get("X-Forwarded-Method"), h.Get("X-Original-Method"), r.Method)
 		uri := firstNonEmpty(h.Get("X-Forwarded-Uri"), h.Get("X-Original-URI"), r.RequestURI)
 		host := firstNonEmpty(h.Get("X-Forwarded-Host"), r.Host)
-		q := Request{Peer: peer, Client: firstNonEmpty(h.Get("X-Makit-Client"), h.Get(g.header)), Method: method, Host: host,
+		q := Request{Peer: peer, Client: firstNonEmpty(h.Get("X-Makit-Client"), headerChain(h, g.header)), Method: method, Host: host,
 			URI: uri, UA: h.Get("User-Agent"), Referer: h.Get("Referer"), Country: h.Get("CF-IPCountry"), Ray: h.Get("CF-Ray"),
 			Headers: hdr, Received: time.Now()}
 		if !g.ask.Load() {
@@ -232,6 +240,19 @@ func (g *Gate) checkHandler() http.Handler {
 		g.record(snap)
 		w.WriteHeader(http.StatusOK)
 	})
+}
+
+// headerChain joins every line of a header in order ("a, b" and a second line "c" → "a, b, c"): a forwarding chain
+// read from the right must see the lines proxies appended, not only the first line a visitor may have sent.
+func headerChain(h http.Header, name string) string {
+	v := h.Values(name)
+	switch len(v) {
+	case 0:
+		return ""
+	case 1:
+		return v[0]
+	}
+	return strings.Join(v, ", ")
 }
 
 func firstNonEmpty(v ...string) string {

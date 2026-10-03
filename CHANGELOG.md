@@ -6,6 +6,12 @@
   `makit scan` report. `makit shield status` prints a readable summary at a terminal (`--json` for the raw counters,
   as before when piped). Colour is off when output is not a terminal, with `NO_COLOR` or `TERM=dumb`, and on
   anywhere with `FORCE_COLOR`; saved and sent reports never carry colour codes.
+- `makit shield`: the client IP behind a load balancer is read from the right of `X-Forwarded-For` — trusted proxies
+  are skipped and the first address that is not one is the visitor, so a client can no longer choose its own IP by
+  sending the header (every header line counts; at most 16 hops). `trusted_proxies` presets `aws-alb`, `vpc` and
+  `loopback` next to `cloudflare`. A trusted proxy is never banned automatically, and `makit shield ban` refuses a
+  range that overlaps one. `/check` without `X-Makit-Peer` takes the asking proxy from the right-most entry, not the
+  left-most one a visitor wrote.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

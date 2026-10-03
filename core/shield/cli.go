@@ -185,6 +185,15 @@ func lockoutGuard(p netip.Prefix) error {
 			return fmt.Errorf("%s overlaps Cloudflare %s: that blocks every visitor coming through Cloudflare — ban the client IP instead (--force to insist)", p, cf)
 		}
 	}
+	path := firstNonEmpty(os.Getenv("MAKIT_SHIELD_CONFIG"), DefaultConfig)
+	if cfg, err := LoadConfig(path); err == nil {
+		trusted, _ := cfg.Trusted()
+		for _, t := range trusted {
+			if t.Overlaps(p) {
+				return fmt.Errorf("%s overlaps the trusted proxy range %s (trusted_proxies in %s): every visitor coming through that proxy would be blocked — ban the client IP instead (--force to insist)", p, t, path)
+			}
+		}
+	}
 	return nil
 }
 
