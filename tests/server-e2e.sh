@@ -82,7 +82,9 @@ code=$(ask "-H 'X-Makit-Peer: 198.51.100.20' -H 'X-Forwarded-Method: GET' -H 'X-
 code=$(ask "-H 'X-Makit-Peer: 203.0.113.9' -H 'X-Forwarded-Method: GET' -H 'X-Forwarded-Uri: /.env' -H 'X-Forwarded-Host: goes.vn'")
 [[ $code == 403 ]] && ok "a probe for /.env: 403" || fail "a probe for /.env: $code"
 on 'makit shield log -n 2' | tail -2
-on 'makit shield unban 203.0.113.9' >/dev/null
+# The gate saves automatic bans once a second: wait until this one is in the list before taking it out.
+for _ in 1 2 3 4 5 6 7 8 9 10; do on 'makit shield list' | grep -q 203.0.113.9 && break; sleep 0.5; done
+on 'makit shield unban 203.0.113.9' >/dev/null && ok "the probe's automatic ban is listed and can be lifted"
 
 [[ ${KEEP:-} == 1 ]] || on 'makit shield uninstall >/dev/null 2>&1; docker network rm goes >/dev/null 2>&1 || true'
 printf '\n\033[32mserver end to end: ok\033[0m\n'

@@ -236,7 +236,10 @@ func cmdRemove(kind string, args []string) error {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("%s is not in the %s list", p, map[string]string{"unban": "block", "unallow": "allow"}[kind])
+		if kind == "unban" { // the gate saves automatic bans once a second: one made just now may not be there yet
+			return fmt.Errorf("%s is not in the block list (an automatic ban is saved within a second of the request — if it was just banned, run this again)", p)
+		}
+		return fmt.Errorf("%s is not in the allow list", p)
 	}
 	fmt.Println(term.Ok(term.Bold(p.String()) + " removed"))
 	return nil
