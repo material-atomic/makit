@@ -15,19 +15,13 @@ cd "$(dirname "$0")/.."
 box=${1:-terrarium-linux-server}
 from=${FROM:-v0.6.0}
 ver=v$(cat VERSION)-test
-ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-fail() { printf '  \033[31m✗ %s\033[0m\n' "$*"; exit 1; }
-on() { docker exec -i "$box" bash -lc "$*"; }
-step() { printf '\n\033[1m▶ %s\033[0m\n' "$*"; }
-
-docker inspect -f '{{.State.Running}}' "$box" 2>/dev/null | grep -q true || fail "$box is not running (terrarium start linux-server)"
-on 'systemctl is-system-running --wait' >/dev/null 2>&1 || true
-[[ $(on 'ip -4 -o addr show dev eth0 | awk "{print \$4}" | head -1') != 172.* ]] || fail "$box: eth0's first address is private — not laid out like a VPS"
+. tests/lib/server.sh
+need_server
+on 'test ! -e /opt/makit' || fail "$box already has makit — this test starts from a new server: terrarium remove linux-server --data --yes && terrarium start linux-server"
 
 step "makit $from from makit.sh, as on a new server"
 on "curl -fsSL https://makit.sh/install.sh | sh -s -- $from" | tail -1
-on 'makit init --yes --swap none'   # a container cannot swapon; the rest runs for real > /tmp/makit-e2e-init.log 2>&1 || { tail -20 /tmp/makit-e2e-init.log; fail "makit init failed"; }
-ok "makit init done"
+init_server
 on 'ip -br link show docker0 | grep -q DOWN' && ok "docker0 is down (nothing runs on Docker's default bridge)"
 
 step "the shield, with its admin address on Docker's bridge"
@@ -51,20 +45,7 @@ fi
 ok "the old unit runs $(on "systemctl show -p ExecStart --value makit-shield | sed 's/.*path=\\([^ ;]*\\).*/\\1/'")"
 
 step "upgrade to this checkout ($ver), the way makit upgrade installs a release"
-rel=$(mktemp -d)
-mkdir "$rel/makit-$ver"
-git ls-files -co --exclude-standard | grep -v '^site/\|^docs/img/' | tar -cf - -T - | tar -xf - -C "$rel/makit-$ver"
-echo "${ver#v}" > "$rel/makit-$ver/VERSION"
-tar -czf "$rel/makit-$ver.tar.gz" -C "$rel" "makit-$ver"
-arch=$(on 'uname -m' | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-(cd core && CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${ver#v}" -o "$rel/makit-core-linux-$arch" .)
-(cd "$rel" && shasum -a 256 "makit-$ver.tar.gz" "makit-core-linux-$arch" > SHA256SUMS)
-on 'rm -rf /tmp/makit-release && mkdir -p /tmp/makit-release'
-for f in SHA256SUMS "makit-$ver.tar.gz" "makit-core-linux-$arch"; do docker cp "$rel/$f" "$box:/tmp/makit-release/$f"; done
-rm -r "$rel"
-# install.sh of the version being installed is the one makit upgrade runs:
-docker cp install.sh "$box:/tmp/makit-release/install.sh"
-on "MAKIT_VERSION=$ver MAKIT_FROM=/tmp/makit-release bash /tmp/makit-release/install.sh" | tail -3
+install_checkout "$ver"
 
 step "after the upgrade"
 exec_start=$(on "systemctl show -p ExecStart --value makit-shield")
