@@ -77,12 +77,16 @@ check "the new policy is live on every replica" 1 "$live"
 check "without restarting them" "$before" "$(kubectl -n "$ns" get pods -l app.kubernetes.io/name=makit-shield -o jsonpath='{.items[*].metadata.uid}')"
 
 echo "== 5. a rate limit across replicas"
-allowed=$(kubectl -n "$ns" exec c -- sh -c "ok=0; i=0; for ip in $(printf '%s ' "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}"); do
-  c=\$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 198.51.100.77' -H 'X-Forwarded-Uri: /' -H 'User-Agent: curl/8.10' http://\$ip:9180/check)
-  [ \"\$c\" = 200 ] && ok=\$((ok+1)); sleep 0.1; done; echo \$ok")
-echo "  limit 10/1m, 30 requests round-robin over ${#pods[@]} replicas at ~10/s: $allowed let through"
-# Between two syncs (250 ms) a replica does not see the others' requests: at ~10 requests/s, ~3 more may pass.
-check "10, plus at most what one sync interval lets through (≤ 15), not 30" 1 "$(( allowed >= 10 && allowed <= 15 ))"
+codes=$(kubectl -n "$ns" exec c -- sh -c "for ip in $(printf '%s ' "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}"); do
+  curl -s -o /dev/null -w '%{http_code} ' -H 'X-Forwarded-For: 198.51.100.77' -H 'X-Forwarded-Uri: /' -H 'User-Agent: curl/8.10' http://\$ip:9180/check; sleep 0.1; done")
+allowed=$(grep -o '200' <<<"$codes" | wc -l | tr -d ' ')
+limited=$(grep -o '429' <<<"$codes" | wc -l | tr -d ' ')
+echo "  limit 10/1m, 30 requests round-robin over ${#pods[@]} replicas at ~10/s: $allowed let through, $limited limited (429)"
+echo "  ($codes)"
+# The claim is a ceiling: the cluster lets through about the limit, not the limit per replica (30 here). Between two
+# syncs (250 ms) a replica does not see the others' requests yet, so ~3 more may pass at ~10 requests/s. Fewer than
+# 10 is fine: 30 requests from one IP in 3 s is also a flood, and the request score may stop one before the limit does.
+check "at most the limit plus one sync interval (≤ 15), not 30" 1 "$(( allowed <= 15 && limited >= 10 ))"
 
 if [[ $fail == 0 ]]; then echo "PASS"; exit 0; fi
 echo "FAIL — what the replicas say:"
