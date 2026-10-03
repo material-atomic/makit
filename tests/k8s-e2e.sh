@@ -36,7 +36,7 @@ pods=($(kubectl -n "$ns" get pods -l app.kubernetes.io/name=makit-shield -o json
 ips=($(kubectl -n "$ns" get pods -l app.kubernetes.io/name=makit-shield -o jsonpath='{.items[*].status.podIP}'))
 ask() { # ask POD_IP CLIENT PATH [UA]: the status /check answers for a visitor CLIENT behind a forged left-most address
   kubectl -n "$ns" exec c -- curl -s -o /dev/null -w '%{http_code}' -H "X-Forwarded-For: 192.0.2.1, $2" \
-    -H "X-Forwarded-Uri: $3" -H "User-Agent: ${4:-Mozilla/5.0 (X11; Linux x86_64) Chrome/126}" -H 'Accept: text/html' \
+    -H "X-Forwarded-Host: shop.example" -H "X-Forwarded-Uri: $3" -H "User-Agent: ${4:-Mozilla/5.0 (X11; Linux x86_64) Chrome/126}" -H 'Accept: text/html' \
     -H 'Accept-Language: en' -H 'Accept-Encoding: gzip' -H 'Sec-Fetch-Mode: navigate' "http://$1:9180/check"
 }
 everywhere() { local out=""; for ip in "${ips[@]}"; do out+="$(ask "$ip" "$1" "$2") "; done; echo "${out% }"; }
@@ -78,14 +78,15 @@ check "without restarting them" "$before" "$(kubectl -n "$ns" get pods -l app.ku
 
 echo "== 5. a rate limit across replicas"
 codes=$(kubectl -n "$ns" exec c -- sh -c "for ip in $(printf '%s ' "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}" "${ips[@]}"); do
-  curl -s -o /dev/null -w '%{http_code} ' -H 'X-Forwarded-For: 198.51.100.77' -H 'X-Forwarded-Uri: /' -H 'User-Agent: curl/8.10' http://\$ip:9180/check; sleep 0.1; done")
+  curl -s -o /dev/null -w '%{http_code} ' -H 'X-Forwarded-For: 198.51.100.77' -H 'X-Forwarded-Host: shop.example' -H 'X-Forwarded-Uri: /' -H 'User-Agent: curl/8.10' http://\$ip:9180/check; sleep 0.1; done")
 allowed=$(grep -o '200' <<<"$codes" | wc -l | tr -d ' ')
 limited=$(grep -o '429' <<<"$codes" | wc -l | tr -d ' ')
 echo "  limit 10/1m, 30 requests round-robin over ${#pods[@]} replicas at ~10/s: $allowed let through, $limited limited (429)"
 echo "  ($codes)"
 # The claim is a ceiling: the cluster lets through about the limit, not the limit per replica (30 here). Between two
 # syncs (250 ms) a replica does not see the others' requests yet, so ~3 more may pass at ~10 requests/s. Fewer than
-# 10 is fine: 30 requests from one IP in 3 s is also a flood, and the request score may stop one before the limit does.
+# 10 is fine. Requests carry X-Forwarded-Host as a gateway sends it: a script calling a bare IP scores as a scanner
+# (host-ip-literal), escalates across the replicas and is banned before the limit matters.
 check "at most the limit plus one sync interval (≤ 15), not 30" 1 "$(( allowed <= 15 && limited >= 10 ))"
 
 if [[ $fail == 0 ]]; then echo "PASS"; exit 0; fi
