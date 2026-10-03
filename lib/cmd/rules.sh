@@ -28,7 +28,7 @@ cmd_rules() {
       rm -rf "$SECURITY_CACHE.new" && cp -r "$tmp/security" "$SECURITY_CACHE.new"
       rm -rf "$SECURITY_CACHE.old"; [[ -d $SECURITY_CACHE ]] && mv "$SECURITY_CACHE" "$SECURITY_CACHE.old"
       mv "$SECURITY_CACHE.new" "$SECURITY_CACHE" && rm -rf "$SECURITY_CACHE.old"
-      ok "catalog updated ($ref): $(MAKIT_SECURITY=$SECURITY_CACHE "$MAKIT_CORE" scan --list-rules | grep -cE '^  (MK-|CVE-|GHSA-)') entries"
+      ok "catalog updated ($ref): $(NO_COLOR=1 FORCE_COLOR='' CLICOLOR_FORCE='' MAKIT_SECURITY=$SECURITY_CACHE "$MAKIT_CORE" scan --list-rules | grep -cE '^  (MK-|CVE-|GHSA-)') entries"
       ;;
     *) die "Unknown: makit rules $sub (list|update|path)" ;;
   esac

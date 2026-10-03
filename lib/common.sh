@@ -4,17 +4,39 @@
 MAKIT_DRY=${MAKIT_DRY:-0}
 MAKIT_YES=${MAKIT_YES:-0}
 
-if [[ -t 1 ]]; then C_B=$'\e[1m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_G=$'\e[32m'; C_0=$'\e[0m'; else C_B=; C_Y=; C_R=; C_G=; C_0=; fi
+# Colour only for a person at a terminal: off when stdout is not one, with NO_COLOR or TERM=dumb; FORCE_COLOR or
+# CLICOLOR_FORCE turn it on anywhere. makit-core follows the same rules (core/term).
+makit_colour() {
+  [[ -n ${FORCE_COLOR:-} && ${FORCE_COLOR} != 0 ]] && return 0
+  [[ -n ${CLICOLOR_FORCE:-} && ${CLICOLOR_FORCE} != 0 ]] && return 0
+  [[ -z ${NO_COLOR:-} && ${TERM:-} != dumb && -t 1 ]]
+}
+if makit_colour; then
+  C_B=$'\e[1m'; C_D=$'\e[2m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_G=$'\e[32m'; C_C=$'\e[36m'; C_0=$'\e[0m'
+else
+  C_B=; C_D=; C_Y=; C_R=; C_G=; C_C=; C_0=
+fi
 
-step() { printf '\n%s▶ %s%s\n' "$C_B" "$*" "$C_0"; }
+step() { printf '\n%s▶%s %s%s%s\n' "$C_C" "$C_0" "$C_B" "$*" "$C_0"; }
 info() { printf '  %s\n' "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
 warn() { printf '  %s⚠ %s%s\n' "$C_Y" "$*" "$C_0" >&2; }
 die()  { printf '%s✗ %s%s\n' "$C_R" "$*" "$C_0" >&2; exit 1; }
 
+# Colours a help text laid out the makit way: the first line is the title, a line ending in ":" at the margin is a
+# heading, a line indented by two spaces starts with a command (cyan) whose example in parentheses is dimmed.
+usage_colour() {
+  if [[ -z $C_0 ]]; then cat; return; fi
+  B=$C_B D=$C_D C=$C_C Z=$C_0 perl -pe '
+    BEGIN { ($B, $D, $C, $Z) = @ENV{qw(B D C Z)} }
+    if ($. == 1) { s/^(.*?) — (.*)$/$B$1$Z$D — $Z$2/ or s/^(.*)$/$B$1$Z/ }
+    elsif (/^\S.*:$/) { s/^(.*)$/$B$1$Z/ }
+    elsif (/^  \S/) { s/^  (\S+)/  $C$1$Z/; s/(\s{2,})(\(.*\))$/$1$D$2$Z/ }'
+}
+
 # Runs a command, or prints it in dry-run mode.
 run() {
-  if [[ $MAKIT_DRY -eq 1 ]]; then printf '  [dry-run] %s\n' "$*"; else "$@"; fi
+  if [[ $MAKIT_DRY -eq 1 ]]; then printf '  %s[dry-run]%s %s\n' "$C_Y" "$C_0" "$*"; else "$@"; fi
 }
 
 # Writes stdin to a file (mode optional), or prints what would be written.
@@ -22,7 +44,8 @@ write_file() {
   local path=$1 mode=${2:-0644} content
   content=$(cat)
   if [[ $MAKIT_DRY -eq 1 ]]; then
-    printf '  [dry-run] write %s (%s):\n' "$path" "$mode"; printf '%s\n' "$content" | sed 's/^/      /'
+    printf '  %s[dry-run]%s write %s%s%s (%s):\n' "$C_Y" "$C_0" "$C_B" "$path" "$C_0" "$mode"
+    printf '%s\n' "$content" | sed "s/^/      $C_D/; s/\$/$C_0/"
     return
   fi
   mkdir -p "$(dirname "$path")"

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/material-atomic/makit/core/term"
 )
 
 // Log analysis: nginx (combined, or makit's format with the Cloudflare IP and host) and Caddy (JSON access logs),
@@ -272,7 +274,7 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 				j, _ := json.Marshal(b)
 				fmt.Println(string(j))
 			} else {
-				fmt.Println(b.Text)
+				fmt.Println(term.Report(b.Text))
 			}
 			if o.notify && b.Worth(min) {
 				sendReport(b, channels)

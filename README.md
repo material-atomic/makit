@@ -66,6 +66,9 @@ already done, so running it again is harmless. Every command accepts `--dry-run`
 
 Global options: `--dry-run` (change nothing), `--yes` (confirm prompts, e.g. `--format` without a terminal).
 
+Output is coloured at a terminal and plain when it is piped or saved; `NO_COLOR=1` turns colour off, `FORCE_COLOR=1`
+keeps it on (CI logs, `less -R`). Reports that are saved or sent as notifications never carry colour codes.
+
 ### Example: a Docker host with OpenSearch and a DigitalOcean volume
 
 ```bash
@@ -223,6 +226,8 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 
 ## Roadmap
 
-Next is v0.6: the request shield for clusters behind a cloud load balancer (AWS ALB/NLB first) — a container image and
-Helm chart, ingress-nginx and Traefik in ask mode, one ban list shared by every replica — and a config playground on
-makit.sh that builds `shield.yaml` from blocks. Everything planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).
+Next is v0.6: the request shield for clusters behind a cloud load balancer (AWS ALB/NLB first). The real client IP
+read safely from `X-Forwarded-For` and PROXY protocol; a signed container image and Helm chart; Envoy `ext_authz`
+(Gateway API), Traefik and ingress-nginx in ask mode; bans, rate limits and scores shared by every replica without a
+network wait on the request path; Prometheus metrics; bans pushed to AWS WAF; ALB log analysis; and a config
+playground on makit.sh with `makit shield config check --replay` to see what a new config would block before it does. Everything planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).

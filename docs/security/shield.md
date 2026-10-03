@@ -243,7 +243,7 @@ and authorization headers are never recorded.
 ```bash
 makit shield log -n 100
 makit shield log --blocked
-makit shield status          # live counters
+makit shield status          # live counters: mode, switches, list sizes, requests by verdict (--json for tools)
 ```
 
 ## Kernel layer (optional)

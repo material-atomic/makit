@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/material-atomic/makit/core/term"
 )
 
 const usage = `makit notify — alerts to Telegram, Slack, Google Chat, Discord, Microsoft Teams, ntfy, webhooks and email
@@ -28,7 +30,7 @@ func Main(args []string) int {
 		path = DefaultConfig
 	}
 	if len(args) == 0 {
-		fmt.Print(usage)
+		fmt.Print(term.Usage(usage))
 		return 2
 	}
 	var err error
@@ -48,13 +50,13 @@ func Main(args []string) int {
 	case "send":
 		err = sendCmd(path, args[1:])
 	case "help", "--help", "-h":
-		fmt.Print(usage)
+		fmt.Print(term.Usage(usage))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "makit notify:", err)
+		fmt.Fprintln(os.Stderr, term.Red("makit notify: "+err.Error()))
 		return 1
 	}
 	return 0
@@ -66,7 +68,7 @@ func list(path string) error {
 		return err
 	}
 	if len(c.Channels) == 0 {
-		fmt.Println("no channels (makit notify add …)")
+		fmt.Println(term.Dim("no channels (makit notify add …)"))
 	}
 	for _, ch := range c.Channels {
 		target := ch.URL
@@ -79,7 +81,9 @@ func list(path string) error {
 		if i := strings.Index(target, "?"); i > 0 {
 			target = target[:i] + "?…" // hide webhook keys
 		}
-		fmt.Printf("  %-18s %-11s %-9s %s\n", ch.Name, ch.Type, firstNonEmpty(ch.MinLevel, "info"), target)
+		lvl := firstNonEmpty(ch.MinLevel, "info")
+		fmt.Printf("  %s %s %s %s\n", term.Bold(fmt.Sprintf("%-18s", ch.Name)), term.Cyan(fmt.Sprintf("%-11s", ch.Type)),
+			term.Level(lvl, fmt.Sprintf("%-9s", lvl)), term.Dim(target))
 	}
 	return nil
 }
@@ -140,7 +144,7 @@ func add(path string, args []string) error {
 	if err := c.Save(path); err != nil {
 		return err
 	}
-	fmt.Printf("channel %s (%s) saved — try it: makit notify test %s\n", ch.Name, ch.Type, ch.Name)
+	fmt.Println(term.Ok(fmt.Sprintf("channel %s (%s) saved", term.Bold(ch.Name), ch.Type)) + " — try it: " + term.Cyan("makit notify test "+ch.Name))
 	return nil
 }
 
@@ -155,7 +159,7 @@ func removeCh(path string, args []string) error {
 	for i, x := range c.Channels {
 		if x.Name == args[0] {
 			c.Channels = append(c.Channels[:i], c.Channels[i+1:]...)
-			fmt.Printf("channel %s removed\n", args[0])
+			fmt.Println(term.Ok("channel " + term.Bold(args[0]) + " removed"))
 			return c.Save(path)
 		}
 	}
@@ -172,10 +176,10 @@ func send(path string, m Message, only string, verbose bool) error {
 	}
 	errs := c.Send(m, only)
 	for _, e := range errs {
-		fmt.Fprintln(os.Stderr, "  ✗", e)
+		fmt.Fprintln(os.Stderr, "  "+term.Fail(e.Error()))
 	}
 	if verbose && len(errs) == 0 {
-		fmt.Println("sent")
+		fmt.Println(term.Ok("sent"))
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%d channel(s) failed", len(errs))

@@ -13,7 +13,7 @@ for f in "$MAKIT_HOME"/lib/cmd/*.sh; do
 done
 
 usage() {
-  cat <<USAGE
+  usage_colour <<USAGE
 makit $MAKIT_VERSION — bootstrap a fresh Ubuntu/Debian server.
 
 Usage: makit [--dry-run] [--yes] <command> [options]

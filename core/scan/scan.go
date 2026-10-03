@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/material-atomic/makit/core/sys"
+	"github.com/material-atomic/makit/core/term"
 )
 
 var Version = "dev"
@@ -163,8 +164,7 @@ func Main(args []string) int {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(rep)
 	} else {
-		fi, _ := os.Stdout.Stat()
-		rep.Print(os.Stdout, fi != nil && fi.Mode()&os.ModeCharDevice != 0)
+		rep.Print(os.Stdout, term.On)
 	}
 	if rep.worst() >= Medium {
 		return 1

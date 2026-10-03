@@ -96,16 +96,25 @@ func (r *Report) Print(w io.Writer, color bool) {
 		}
 		return sevColor[s] + t + "\033[0m"
 	}
-	fmt.Fprintf(w, "\nmakit scan %s · %s · %s → %s\n", r.Version, r.Host, r.Started.Format(time.RFC3339), r.Finished.Format("15:04:05"))
-	fmt.Fprintf(w, "targets: %s\n", strings.Join(r.Targets, ", "))
-	fmt.Fprintf(w, "catalog: %s\n", strings.Join(r.Catalog, ", "))
-	fmt.Fprintf(w, "checked: %d processes, %d files, %d sockets, %d packages\n\n", r.Stats.Processes, r.Stats.Files, r.Stats.Sockets, r.Stats.Packages)
+	paint := func(code, t string) string {
+		if !color || t == "" {
+			return t
+		}
+		return "\033[" + code + "m" + t + "\033[0m"
+	}
+	bold, dim, cyan := func(t string) string { return paint("1", t) }, func(t string) string { return paint("2", t) },
+		func(t string) string { return paint("36", t) }
+	fmt.Fprintf(w, "\n%s %s\n", bold("makit scan "+r.Version+" · "+r.Host),
+		dim(r.Started.Format(time.RFC3339)+" → "+r.Finished.Format("15:04:05")))
+	fmt.Fprintf(w, "%s %s\n", dim("targets:"), strings.Join(r.Targets, ", "))
+	fmt.Fprintf(w, "%s %s\n", dim("catalog:"), strings.Join(r.Catalog, ", "))
+	fmt.Fprintf(w, "%s %d processes, %d files, %d sockets, %d packages\n\n", dim("checked:"), r.Stats.Processes, r.Stats.Files, r.Stats.Sockets, r.Stats.Packages)
 	counts := map[Severity]int{}
 	for _, f := range r.Findings {
 		counts[f.Severity]++
 	}
 	if len(r.Findings) == 0 {
-		fmt.Fprintln(w, "No suspicious items found.")
+		fmt.Fprintln(w, paint("32", "✓ No suspicious items found."))
 	}
 	for _, f := range r.Findings {
 		loc := f.Path
@@ -116,21 +125,29 @@ func (r *Report) Print(w io.Writer, color bool) {
 		if len(f.Refs) > 0 {
 			refs = " · " + strings.Join(f.Refs, ", ")
 		}
-		fmt.Fprintf(w, "%s %s · %s · %s%s\n", c(f.Severity, fmt.Sprintf("[%s]", f.Severity)), f.Title, f.Target, f.Rule, refs)
+		fmt.Fprintf(w, "%s %s · %s · %s%s\n", c(f.Severity, fmt.Sprintf("[%s]", f.Severity)), bold(f.Title), f.Target, cyan(f.Rule), dim(refs))
 		if loc != "" {
 			fmt.Fprintf(w, "    %s\n", loc)
 		}
 		for _, e := range f.Evidence {
-			fmt.Fprintf(w, "    · %s\n", e)
+			fmt.Fprintf(w, "    %s\n", dim("· "+e))
 		}
 		if f.Doc != "" {
-			fmt.Fprintf(w, "    → %s\n", f.Doc)
+			fmt.Fprintf(w, "    %s %s\n", cyan("→"), f.Doc)
 		}
 	}
 	for _, n := range r.Notes {
-		fmt.Fprintf(w, "\nnote: %s", n)
+		fmt.Fprintf(w, "\n%s %s", paint("33", "note:"), n)
 	}
-	fmt.Fprintf(w, "\n\nsummary: %d critical, %d high, %d medium, %d low, %d info\n", counts[Critical], counts[High], counts[Medium], counts[Low], counts[Info])
+	sum := func(s Severity, name string) string {
+		t := fmt.Sprintf("%d %s", counts[s], name)
+		if counts[s] == 0 {
+			return dim(t)
+		}
+		return c(s, t)
+	}
+	fmt.Fprintf(w, "\n\n%s %s, %s, %s, %s, %s\n", bold("summary:"), sum(Critical, "critical"), sum(High, "high"), sum(Medium, "medium"),
+		sum(Low, "low"), sum(Info, "info"))
 	if r.worst() >= High {
 		fmt.Fprintln(w, `
 Nothing was changed. Suggested response (manual):

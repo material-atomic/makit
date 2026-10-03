@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/material-atomic/makit/core/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -68,13 +69,15 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 			cats = append(cats, c)
 		}
 		sort.Strings(cats)
-		fmt.Println("CATEGORY       ACTION         AGENTS  ")
+		fmt.Println(term.Bold("CATEGORY       ACTION         AGENTS"))
 		for _, c := range cats {
 			a, _ := bc.Policy(c)
-			fmt.Printf("  %-13s %-14s %3d     %s\n", c, a, count[c], bc.Categories[c].Label)
+			fmt.Printf("  %s %s %3d     %s\n", term.Cyan(fmt.Sprintf("%-13s", c)), term.Verdict(a.Kind, fmt.Sprintf("%-14s", a)), count[c],
+				term.Dim(bc.Categories[c].Label))
 		}
 		sp, _ := bc.Policy("spoofed")
-		fmt.Printf("  %-13s %-14s         pretends to be a verifiable bot\n", "spoofed", sp)
+		fmt.Printf("  %s %s         %s\n", term.Cyan(fmt.Sprintf("%-13s", "spoofed")), term.Verdict(sp.Kind, fmt.Sprintf("%-14s", sp)),
+			term.Dim("pretends to be a verifiable bot"))
 		var own []string
 		for k, v := range cfg.Bots.Policy {
 			if _, isCat := bc.Categories[k]; !isCat && k != "spoofed" {
@@ -83,12 +86,12 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		}
 		if len(own) > 0 {
 			sort.Strings(own)
-			fmt.Println("agent overrides:", strings.Join(own, "  "))
+			fmt.Println(term.Bold("agent overrides:"), strings.Join(own, "  "))
 		}
 		if sc != nil {
-			fmt.Print("bot score (undeclared clients):")
+			fmt.Print(term.Bold("bot score") + term.Dim(" (undeclared clients):"))
 			for _, l := range sc.LevelOrder {
-				fmt.Printf("  %s≥%d → %s", l, sc.Levels[l], sc.Act(l))
+				fmt.Printf("  %s≥%d → %s", term.Level(l, l), sc.Levels[l], term.Verdict(sc.Act(l).Kind, sc.Act(l).String()))
 			}
 			fmt.Println()
 		}
@@ -117,11 +120,13 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 			return json.NewEncoder(os.Stdout).Encode(out)
 		}
 		for _, a := range out {
-			v := "claimed"
+			v := term.Dim(fmt.Sprintf("%-10s", "claimed"))
 			if a.Verifiable() {
-				v = "verifiable"
+				v = term.Green(fmt.Sprintf("%-10s", "verifiable"))
 			}
-			fmt.Printf("  %-22s %-13s %-14s %-10s %s\n", a.ID, a.Category, bc.PolicyFor(a), v, firstNonEmpty(a.Operator, "-"))
+			pol := bc.PolicyFor(a)
+			fmt.Printf("  %s %s %s %s %s\n", term.Bold(fmt.Sprintf("%-22s", a.ID)), term.Cyan(fmt.Sprintf("%-13s", a.Category)),
+				term.Verdict(pol.Kind, fmt.Sprintf("%-14s", pol)), v, term.Dim(firstNonEmpty(a.Operator, "-")))
 		}
 		return nil
 	case "set", "unset":
@@ -162,9 +167,9 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 			}
 		}
 		if sub == "set" {
-			fmt.Printf("bots: %s → %s\n", key, val)
+			fmt.Println(term.Ok("bots: " + term.Bold(key) + " → " + term.Verdict(val, val)))
 		} else {
-			fmt.Printf("bots: %s back to the catalog default\n", key)
+			fmt.Println(term.Ok("bots: " + term.Bold(key) + " back to the catalog default"))
 		}
 		return nil
 	case "check":
@@ -190,10 +195,11 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		}
 		a := bc.Identify(r)
 		if a == nil {
-			fmt.Println("not a known bot")
+			fmt.Println(term.Dim("not a known bot"))
 			if sc != nil {
 				s, hits := sc.ScoreRequest(r, 0)
-				fmt.Printf("bot score %d (%s) → %s  %s\n", s, sc.Level(s), sc.Act(sc.Level(s)), strings.Join(hits, " "))
+				l, act := sc.Level(s), sc.Act(sc.Level(s))
+				fmt.Printf("bot score %s (%s) → %s  %s\n", term.Bold(fmt.Sprint(s)), term.Level(l, l), term.Verdict(act.Kind, act.String()), term.Dim(strings.Join(hits, " ")))
 			}
 			return nil
 		}
@@ -215,9 +221,10 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		if st == "spoofed" {
 			act, _ = bc.Policy("spoofed")
 		}
-		fmt.Printf("%s (%s) · %s · %s → %s\n", a.Name, a.ID, bc.Categories[a.Category].Label, st, act)
+		fmt.Printf("%s %s · %s · %s → %s\n", term.Bold(a.Name), term.Dim("("+a.ID+")"), term.Cyan(bc.Categories[a.Category].Label),
+			term.Verdict(st, st), term.Verdict(act.Kind, term.Bold(act.String())))
 		if a.URL != "" {
-			fmt.Println("  ", a.URL)
+			fmt.Println("  ", term.Dim(a.URL))
 		}
 		return nil
 	case "update":
@@ -237,10 +244,10 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		for _, st := range done {
 			if st.Error != "" {
 				failed++
-				fmt.Fprintf(os.Stderr, "  ✗ %-18s %s: %s\n", st.Agent, st.URL, st.Error)
+				fmt.Fprintf(os.Stderr, "  %s\n", term.Fail(fmt.Sprintf("%-18s %s: %s", st.Agent, st.URL, st.Error)))
 				continue
 			}
-			fmt.Printf("  %-18s %8d  %s\n", st.Agent, st.Count, st.URL)
+			fmt.Printf("  %s %s %8d  %s\n", term.Green("✓"), term.Bold(fmt.Sprintf("%-18s", st.Agent)), st.Count, term.Dim(st.URL))
 		}
 		if failed > 0 && failed == len(done) {
 			return fmt.Errorf("no feed downloaded")
@@ -255,21 +262,22 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		for _, a := range bc.Agents {
 			for _, f := range a.feeds {
 				st := status[f.File]
-				state := "not downloaded yet"
+				state := term.Yellow("not downloaded yet")
 				if !st.OK.IsZero() {
-					state = fmt.Sprintf("%d · %s ago", st.Count, time.Since(st.OK).Round(time.Minute))
+					state = term.Green(fmt.Sprint(st.Count)) + term.Dim(fmt.Sprintf(" · %s ago", time.Since(st.OK).Round(time.Minute)))
 				}
 				if st.Error != "" {
-					state += " · last try failed: " + st.Error
+					state += term.Red(" · last try failed: " + st.Error)
 				}
 				who := "catalog"
 				if f.Custom {
 					who = "yours"
 				}
-				fmt.Printf("  %-18s %-7s every %-5s %s\n      %s\n", a.ID, who, fmtDur(f.Every), state, f.URL)
+				fmt.Printf("  %s %s every %-5s %s\n      %s\n", term.Bold(fmt.Sprintf("%-18s", a.ID)), term.Cyan(fmt.Sprintf("%-7s", who)),
+					fmtDur(f.Every), state, term.Dim(f.URL))
 			}
 			if len(a.manual) > 0 {
-				fmt.Printf("  %-18s %-7s typed       %d\n", a.ID, "yours", len(a.manual))
+				fmt.Printf("  %s %s typed       %d\n", term.Bold(fmt.Sprintf("%-18s", a.ID)), term.Cyan(fmt.Sprintf("%-7s", "yours")), len(a.manual))
 			}
 		}
 		return nil
@@ -281,7 +289,7 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		only, _ := splitFirst(rest)
 		for _, src := range cfg.Bots.Sources {
 			if (only == "" || src.Agent == only) && len(src.IPs) > 0 {
-				fmt.Printf("  %-18s %s\n", src.Agent, strings.Join(src.IPs, " "))
+				fmt.Printf("  %s %s\n", term.Bold(fmt.Sprintf("%-18s", src.Agent)), strings.Join(src.IPs, " "))
 			}
 		}
 		return nil
@@ -293,7 +301,7 @@ func cmdBots(cfgPath string, dirs []string, args []string) error {
 		fmt.Print(bc.Robots())
 		return nil
 	case "help", "-h", "--help":
-		fmt.Print(botsUsage)
+		fmt.Print(term.Usage(botsUsage))
 		return nil
 	}
 	fmt.Fprint(os.Stderr, botsUsage)
@@ -411,7 +419,7 @@ func cmdCustomize(dirs []string, args []string) error {
 			return err
 		}
 	}
-	fmt.Printf("edit the files under %s — they override the bundled catalog; the running gate reloads them within 2 s\n", *to)
+	fmt.Println(term.Ok("edit the files under "+term.Bold(*to)) + term.Dim(" — they override the bundled catalog; the running gate reloads them within 2 s"))
 	return nil
 }
 
@@ -433,7 +441,7 @@ func copyTree(src, dst string, force bool) error {
 		return nil
 	}
 	if _, err := os.Stat(dst); err == nil && !force {
-		fmt.Printf("  kept   %s (already customized; --force to replace)\n", dst)
+		fmt.Printf("  %s %s %s\n", term.Yellow("kept  "), dst, term.Dim("(already customized; --force to replace)"))
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -452,7 +460,7 @@ func copyTree(src, dst string, force bool) error {
 		out.Close()
 		return err
 	}
-	fmt.Printf("  copied %s\n", dst)
+	fmt.Printf("  %s %s\n", term.Green("copied"), dst)
 	return out.Close()
 }
 
@@ -562,7 +570,7 @@ func cmdBotSource(cfgPath string, dirs []string, args []string, _ func() (*BotCa
 		if err != nil {
 			return err
 		}
-		fmt.Printf("source added for %s; downloading…\n", src.Agent)
+		fmt.Println(term.Ok("source added for "+term.Bold(src.Agent)) + term.Dim("; downloading…"))
 		done, err := RefreshBotRanges(bc, true, src.Agent)
 		if err != nil {
 			return err
@@ -574,11 +582,11 @@ func cmdBotSource(cfgPath string, dirs []string, args []string, _ func() (*BotCa
 			if st.Error != "" {
 				return fmt.Errorf("saved, but the first download failed: %s (the gate retries every hour)", st.Error)
 			}
-			fmt.Printf("  %d IPs/ranges", st.Count)
+			fmt.Printf("  %s IPs/ranges", term.Bold(fmt.Sprint(st.Count)))
 			if st.Skipped > 0 {
-				fmt.Printf(" (%d refused: wider than /8 or /32)", st.Skipped)
+				fmt.Print(term.Yellow(fmt.Sprintf(" (%d refused: wider than /8 or /32)", st.Skipped)))
 			}
-			fmt.Println(" — the running gate picks them up within 2 s")
+			fmt.Println(term.Dim(" — the running gate picks them up within 2 s"))
 		}
 		return nil
 	case "remove":
@@ -601,7 +609,7 @@ func cmdBotSource(cfgPath string, dirs []string, args []string, _ func() (*BotCa
 			return err
 		}
 		_ = os.Remove(filepath.Join(botsDir(), feedFile(agent, url)))
-		fmt.Printf("source removed from %s\n", agent)
+		fmt.Println(term.Ok("source removed from " + term.Bold(agent)))
 		return nil
 	}
 	return fmt.Errorf("usage: bots source add|remove URL …")
@@ -672,6 +680,7 @@ func cmdBotIP(cfgPath string, dirs []string, args []string, _ func() (*BotCatalo
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s: %s %s — the running gate picks it up within 2 s\n", agent, map[string]string{"add": "added", "remove": "removed"}[sub], strings.Join(norm, " "))
+	fmt.Println(term.Ok(fmt.Sprintf("%s: %s %s", term.Bold(agent), map[string]string{"add": "added", "remove": "removed"}[sub], strings.Join(norm, " "))) +
+		term.Dim(" — the running gate picks it up within 2 s"))
 	return nil
 }

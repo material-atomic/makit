@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.0
+- Colour in the terminal: help pages, `makit status`, `makit docs` (guides rendered with headings and code
+  highlighted), `makit shield` lists, logs, reports, `analyze`, `sites` and `bots`, `makit notify` and the
+  `makit scan` report. `makit shield status` prints a readable summary at a terminal (`--json` for the raw counters,
+  as before when piped). Colour is off when output is not a terminal, with `NO_COLOR` or `TERM=dumb`, and on
+  anywhere with `FORCE_COLOR`; saved and sent reports never carry colour codes.
+
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.
   - Its own IP set (IP/CIDR with expiry, a hash table per prefix length — no ipset): ~180 ns per lookup with
