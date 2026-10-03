@@ -12,6 +12,10 @@
   `loopback` next to `cloudflare`. A trusted proxy is never banned automatically, and `makit shield ban` refuses a
   range that overlaps one. `/check` without `X-Makit-Peer` takes the asking proxy from the right-most entry, not the
   left-most one a visitor wrote.
+- `makit shield` edge listeners read PROXY protocol v1 and v2 (`accept_proxy_protocol: true`) from trusted proxies only —
+  an AWS NLB or HAProxy in front keeps TLS at makit and makit still sees the visitor. Bans apply at accept, before
+  TLS; a visitor's own PROXY line is never believed; headers are read off the accept loop with a 5 s limit; TLVs are
+  skipped; malformed headers are dropped and counted.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

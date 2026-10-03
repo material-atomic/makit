@@ -241,6 +241,9 @@ func (g *Gate) Serve(ctx context.Context, ls []Listener) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", l.Name, err)
 		}
+		if l.AcceptProxyProtocol {
+			raw = newProxyListener(raw, g, l.Name)
+		}
 		ln := net.Listener(&guardListener{Listener: raw, g: g, name: l.Name})
 		if strings.HasPrefix(l.Upstream, "tcp://") {
 			go g.tcpProxy(ln, l)

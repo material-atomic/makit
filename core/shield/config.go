@@ -31,6 +31,7 @@ type Listener struct {
 		Default string   `yaml:"default_sni"`
 	} `yaml:"tls"`
 	ProxyProtocol       bool `yaml:"proxy_protocol"`        // tcp:// upstreams: send PROXY v1 so the service still sees the client IP
+	AcceptProxyProtocol bool `yaml:"accept_proxy_protocol"` // read a PROXY v1/v2 header from trusted proxies (AWS NLB, HAProxy)
 	InsecureUpstreamTLS bool `yaml:"insecure_upstream_tls"` // https:// upstream with a self-signed/internal certificate
 }
 

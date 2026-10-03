@@ -76,6 +76,30 @@ ingress-nginx `auth-url` asks makit without an `X-Makit-Peer` header, the asking
 `X-Forwarded-For` entry. Measured cost: ~270 ns and no allocation to resolve a three-hop chain against Cloudflare
 and the VPC ranges (`go test ./shield -bench ClientIPChain`, Apple M1).
 
+### PROXY protocol (AWS NLB, HAProxy)
+
+A TCP load balancer does not touch HTTP, so there is no header to read: with PROXY protocol it puts the visitor's
+address in front of the connection instead. Turn it on for the listener behind it:
+
+```yaml
+edge: true
+trusted_proxies: [aws-alb]          # the NLB's subnets
+listeners:
+  - name: web
+    listen: ":443"
+    upstream: http://127.0.0.1:8080
+    accept_proxy_protocol: true     # v1 and v2; enable "Proxy protocol v2" on the NLB target group
+    tls: { acme: [example.com] }
+```
+
+The header is read **only from trusted proxies**: from anyone else the bytes go on untouched, so a visitor who sends
+its own `PROXY TCP4 <address>` line gets a broken request, never a new address. A trusted peer that sends no header
+(a TCP health check) and the `LOCAL` command keep the connection's own address; TLVs such as the AWS VPC endpoint id
+are skipped. The visitor is checked against bans and lists right after the header, before TLS. Headers are read off
+the accept loop with a 5-second limit, so a stalled connection cannot hold up the others; malformed headers are
+dropped and counted as `proxy-protocol-error` in `makit shield status`. With an NLB that preserves client IPs (IP
+targets, no PROXY protocol), the connection already comes from the visitor and nothing needs to be set.
+
 ## The set and the allowlist
 
 ```bash
