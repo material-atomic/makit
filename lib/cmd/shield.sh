@@ -62,7 +62,18 @@ shield_start() {
   else run systemctl enable --now makit-shield >/dev/null 2>&1; fi
 }
 
+# The paths the unit runs: /opt/makit/current when this makit is the one it points at, so the gate runs the installed
+# version after an upgrade — not the folder of the version that first wrote the unit.
+shield_unit_home() {
+  local cur=${MAKIT_PREFIX:-/opt/makit}/current
+  if [[ -e $cur && $(readlink -f "$cur") == "$(readlink -f "$MAKIT_HOME")" ]]; then echo "$cur"; else echo "$MAKIT_HOME"; fi
+}
+
 shield_install_unit() {
+  local home core security
+  home=$(shield_unit_home)
+  core=${MAKIT_CORE/#"$MAKIT_HOME"/$home}
+  security=$(security_dirs); security=${security/#"$MAKIT_HOME"/$home}
   write_file "$SHIELD_UNIT" <<UNIT
 [Unit]
 Description=makit shield (IP gate)
@@ -70,9 +81,9 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=$MAKIT_CORE shield serve
+ExecStart=$core shield serve
 ExecReload=/bin/kill -HUP \$MAINPID
-Environment=MAKIT_SECURITY=$(security_dirs)
+Environment=MAKIT_SECURITY=$security
 Restart=always
 RestartSec=2
 LimitNOFILE=65536
@@ -87,7 +98,7 @@ cmd_shield() {
   local sub=${1:-status}; shift || true
   case "$sub" in
     --help|help)
-      echo "makit shield on [--observe] | off | status | edit (checked before it is saved) | uninstall
+      echo "makit shield on [--observe] | off | status | restart | edit (checked before it is saved) | uninstall
 makit shield ask on|off      Caddy/nginx ask makit before each request (/check); off = always allow
 makit shield edge on|off     makit in front of Caddy/nginx (the listeners in $SHIELD_CONF)
 makit shield mode block|observe
@@ -166,6 +177,19 @@ Docs: makit docs shield"; return ;;
       run systemctl daemon-reload
       have nft && run nft delete table inet makit_shield 2>/dev/null || true
       ok "removed (lists kept in /var/lib/makit/shield, config in $SHIELD_CONF)"
+      ;;
+    restart)
+      # After an upgrade: the unit points at the installed version, the config is checked with the new binary, then
+      # the gate starts again on it. A config the new version refuses keeps the running gate as it is.
+      require_root; require_core
+      systemctl is-active --quiet makit-shield 2>/dev/null || { info "not running (makit shield on)"; return 0; }
+      step "makit shield: restart on makit $MAKIT_VERSION"
+      if [[ -f $SHIELD_CONF ]] && ! MAKIT_SECURITY=$(security_dirs) "$MAKIT_CORE" shield config check "$SHIELD_CONF"; then
+        die "makit $MAKIT_VERSION refuses $SHIELD_CONF — the gate keeps running the previous version; fix it, then: makit shield restart"
+      fi
+      shield_install_unit
+      run systemctl restart makit-shield
+      ok "gate restarted on makit $MAKIT_VERSION"
       ;;
     status)
       if systemctl is-active --quiet makit-shield 2>/dev/null; then

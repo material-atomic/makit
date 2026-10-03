@@ -3,10 +3,12 @@ package shield
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The admin address is on this machine or its private network: an http_proxy set for downloads must never answer
@@ -62,5 +64,21 @@ func TestStatusSaysWhatAnsweredInstead(t *testing.T) {
 	err := cmdStatus(cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "403 Forbidden: forbidden") {
 		t.Fatalf("cmdStatus error = %v, want it to say 403 Forbidden: forbidden", err)
+	}
+}
+
+// The machine's own public address is "this machine": Docker's MASQUERADE turns a request from the host to
+// 172.17.0.1 (docker0 down) into one from eth0's first address.
+func TestLocalCallerIncludesOwnAddresses(t *testing.T) {
+	own.Lock()
+	own.addrs = map[netip.Addr]bool{netip.MustParseAddr("165.22.96.192"): true}
+	own.at = time.Now()
+	own.Unlock()
+	t.Cleanup(func() { own.Lock(); own.addrs, own.at = nil, time.Time{}; own.Unlock() })
+	for addr, want := range map[string]bool{"165.22.96.192:60436": true, "172.17.0.1:5": true, "127.0.0.1:1": true,
+		"[::ffff:165.22.96.192]:1": true, "203.0.113.5:1": false, "garbage": false} {
+		if got := localCaller(addr); got != want {
+			t.Errorf("localCaller(%s) = %v, want %v", addr, got, want)
+		}
 	}
 }

@@ -1,11 +1,22 @@
 # Changelog
 
 ## Unreleased
-- `makit shield status` and `makit top` reach the gate's admin address directly, never through `http_proxy` /
-  `HTTP_PROXY`: a proxy set for downloads answered in the gate's place, and `status` failed with a JSON error
-  ("invalid character 'o' in literal false"). When the gate does answer something else, the error now gives the HTTP
-  status and its first line; a refused caller is named in the refusal (`/check`, `/status`, `/metrics` answer only
-  this machine and private networks).
+- `makit shield`: the gate answers this machine at any of its own addresses, not only loopback and private ones. With
+  `admin: 172.17.0.1:9180` and docker0 down (nothing on Docker's default bridge), a request from the host leaves
+  through lo and Docker's `MASQUERADE` rewrites its source to eth0's public address: the gate refused it, and
+  `makit shield status` failed with "invalid character 'o' in literal false". A host Caddy or nginx asking that
+  address was refused the same way. Other machines cannot use this: the kernel drops packets from outside that carry
+  one of its own addresses.
+- An upgrade takes effect at once: the shield's systemd unit runs `/opt/makit/current`, not the folder of the version
+  that wrote it, and `install.sh` — what `makit upgrade` runs — restarts a running gate on the new version after
+  checking its config with the new binary (a config the new version refuses leaves the old gate running). New:
+  `makit shield restart`.
+- `makit shield status` and `makit top` never send the admin address's requests through `http_proxy`. A non-JSON
+  answer is reported with its HTTP status and first line, and the gate's refusal names the address it refused.
+- `tests/server-e2e.sh`: a fresh VPS end to end (terrarium's linux-server: systemd, Docker inside, eth0 with the public
+  address first) — install the release, `makit init`, the shield with its admin on Docker's bridge, then upgrade to the
+  checkout and check the gate runs it, answers the CLI, and allows a visitor and blocks a probe asked from a container.
+  `install.sh` takes `MAKIT_FROM=DIR` to install a build's release files, checksums verified the same way.
 
 ## v0.6.0
 - Colour in the terminal: help pages, `makit status`, `makit docs` (guides rendered with headings and code

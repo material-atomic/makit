@@ -194,8 +194,8 @@ func buildSites(p *Policy, cfg *Config, dirs []string, siteAllow, siteBlock map[
 func (g *Gate) checkHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only proxies on this machine or its private networks may ask.
-		if ap, err := netip.ParseAddrPort(r.RemoteAddr); err != nil || !(ap.Addr().IsLoopback() || ap.Addr().IsPrivate()) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		if !localCaller(r.RemoteAddr) {
+			http.Error(w, "forbidden: makit-shield answers /check only to this machine and private networks, not "+r.RemoteAddr, http.StatusForbidden)
 			return
 		}
 		h := r.Header
@@ -255,13 +255,56 @@ func (g *Gate) checkHandler() http.Handler {
 // cluster): in Kubernetes the admin address listens on every interface of the pod.
 func privateOnly(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ap, err := netip.ParseAddrPort(r.RemoteAddr); err != nil || !(ap.Addr().Unmap().IsLoopback() || ap.Addr().Unmap().IsPrivate()) {
+		if !localCaller(r.RemoteAddr) {
 			// Name the caller: a refusal that does not say who was refused sends people looking in the wrong place.
 			http.Error(w, "forbidden: makit-shield answers "+r.URL.Path+" only to this machine and private networks, not "+r.RemoteAddr, http.StatusForbidden)
 			return
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// localCaller: a caller on this machine or a private network. "This machine" includes every address of its own,
+// not only loopback: with docker0 down, a request from the host to 172.17.0.1 leaves through lo and Docker's
+// "MASQUERADE -s 172.17.0.0/16 ! -o docker0" rewrites its source to the first address of eth0 — the public IP. Such
+// a source cannot be forged from outside: the kernel drops a packet from elsewhere that carries one of its own
+// addresses (a martian), and a TCP handshake could not complete.
+func localCaller(remote string) bool {
+	ap, err := netip.ParseAddrPort(remote)
+	if err != nil {
+		return false
+	}
+	a := ap.Addr().Unmap()
+	return a.IsLoopback() || a.IsPrivate() || ownAddr(a)
+}
+
+// The machine's own addresses, re-read at most every 10 s and only for a caller that is neither loopback nor private
+// (the asking proxy is almost always one of those): no system call on the usual path.
+var own struct {
+	sync.Mutex
+	addrs map[netip.Addr]bool
+	at    time.Time
+}
+
+func ownAddr(a netip.Addr) bool {
+	own.Lock()
+	defer own.Unlock()
+	if own.addrs[a] {
+		return true
+	}
+	if time.Since(own.at) < 10*time.Second {
+		return false
+	}
+	own.at = time.Now()
+	own.addrs = map[netip.Addr]bool{}
+	if ifas, err := net.InterfaceAddrs(); err == nil {
+		for _, ifa := range ifas {
+			if p, err := netip.ParsePrefix(ifa.String()); err == nil {
+				own.addrs[p.Addr().Unmap()] = true
+			}
+		}
+	}
+	return own.addrs[a]
 }
 
 // askedRequest is the request a proxy asks about. Caddy, nginx and Traefik send it in X-Forwarded-Method/-Uri/-Host;
