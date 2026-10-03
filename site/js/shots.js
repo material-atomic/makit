@@ -25,6 +25,16 @@
   let paused = false; // by the button
   let resumeAt = 0;
   root.style.setProperty('--every', `${EVERY}ms`);
+  // Icons are drawn, not typed: characters such as ⏸ and ▶ turn into colour emoji on phones.
+  const icon = (d) => `<svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true" focusable="false">${d}</svg>`;
+  const ICON = {
+    prev: icon('<path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'),
+    next: icon('<path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'),
+    play: icon('<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>'),
+    pause: icon('<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/>'),
+  };
+  root.querySelector('.prev').innerHTML = ICON.prev;
+  root.querySelector('.next').innerHTML = ICON.next;
 
   slides.forEach((s, i) => {
     const b = document.createElement('button');
@@ -82,7 +92,7 @@
     clearTimeout(timer);
     const running = visible && !hover && !paused && !document.hidden;
     root.classList.toggle('running', running);
-    toggle.textContent = paused ? '▶' : '⏸';
+    toggle.innerHTML = paused ? ICON.play : ICON.pause;
     toggle.setAttribute('aria-label', paused ? 'Play' : 'Pause');
     if (!running) return;
     const wait = Math.max(EVERY, resumeAt - Date.now());

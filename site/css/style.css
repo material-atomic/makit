@@ -45,6 +45,7 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.92em; }
 .top nav { margin-left: auto; display: flex; gap: 18px; font-size: 15px; }
 .top nav a { color: var(--fg-dim); }
 .top nav a:hover, .top nav a.on { color: var(--fg); text-decoration: none; }
+.nav-toggle { display: none; }
 
 /* hero: always dark, with the blue glow of the brand image */
 .hero {
@@ -195,8 +196,21 @@ footer .sp { margin-left: auto; }
   .install .label { margin-bottom: 6px; font-size: 12px; }
   footer .sp { margin-left: 0; }
 }
-@media (max-width: 420px) {
-  .top nav a[href*="benchmark"] { display: none; }
+/* Phones: the links go into a menu (app.js adds the button). Without JavaScript they wrap into a row that scrolls
+   sideways, so the header never makes the page wider than the screen. */
+@media (max-width: 720px) {
+  .top .wrap { flex-wrap: wrap; height: auto; min-height: 56px; row-gap: 0; }
+  .top nav { margin-left: 0; width: 100%; overflow-x: auto; white-space: nowrap; padding-bottom: 10px; scrollbar-width: none; }
+  .top.menu .wrap { position: relative; flex-wrap: nowrap; height: 56px; }
+  .top.menu nav { display: none; position: absolute; top: 56px; left: 0; right: 0; width: auto; flex-direction: column; gap: 0;
+    padding: 4px 16px 10px; background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 12px 24px rgba(0, 0, 0, .35); }
+  .top.menu.open nav { display: flex; }
+  .top.menu nav a { padding: 13px 2px; font-size: 16px; border-bottom: 1px solid var(--line); }
+  .top.menu nav a:last-child { border-bottom: 0; }
+  .top.menu .nav-toggle { display: grid; place-items: center; margin-left: auto; width: 40px; height: 40px; padding: 0; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; color: var(--fg); font-size: 20px; cursor: pointer; }
+  /* 16px fields: iOS zooms the page into anything smaller when it gets focus */
+  input, select, textarea { font-size: 16px; }
 }
 
 /* screens: real captures of makit in a terminal, as a 3D carousel */
@@ -223,6 +237,7 @@ footer .sp { margin-left: auto; }
   position: absolute; top: calc(clamp(240px, 46vw, 560px) / 2); transform: translateY(-50%); z-index: 50;
   width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: rgba(18, 24, 33, .85);
   color: var(--fg); font-size: 22px; line-height: 1; cursor: pointer; backdrop-filter: blur(6px);
+  display: grid; place-items: center; padding: 0;
 }
 .carousel .nav:hover { border-color: var(--accent); color: var(--accent); }
 .carousel .nav.prev { left: 0; }
@@ -237,7 +252,7 @@ footer .sp { margin-left: auto; }
 .carousel.running .dots button.on::after { animation: fill var(--every, 4.5s) linear; }
 @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .carousel .controls { display: flex; justify-content: center; align-items: center; gap: 14px; }
-.carousel .play { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--fg-dim); font-size: 11px; line-height: 1; cursor: pointer; }
+.carousel .play { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--fg-dim); font-size: 12px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
 .carousel .play:hover { color: var(--accent); border-color: var(--accent); }
 @media (max-width: 640px) {
   .carousel .slide { width: 88%; }
