@@ -3,6 +3,7 @@ package shield
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -42,6 +43,9 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
   report [-n 1] [--date YYYY-MM-DD] [--site NAME]
                                 the latest batch reports (also sent through makit notify when worth it)
   bots …                        known bots, crawlers and AI agents: policy per category or agent (makit shield bots help)
+  config check [FILE|-] [--replay LOG] [--against FILE] [--json]
+                                check a config before it is loaded (every key, listener, range and catalog
+                                setting); --replay runs it against an access log next to the current one
   customize scoring|bots|rules [--to /etc/makit/security]
                                 copy catalog files to edit locally; your copies override the bundled ones
   snippet caddy|nginx [--addr 127.0.0.1:9180]
@@ -107,11 +111,16 @@ func Main(args []string, dirs []string) int {
 		err = cmdAnalyze(cfgPath, dirs, rest)
 	case "customize":
 		err = cmdCustomize(dirs, rest)
+	case "config":
+		err = cmdConfig(cfgPath, dirs, rest)
 	case "help", "--help", "-h":
 		fmt.Print(term.Usage(usage))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		return 2
+	}
+	if errors.Is(err, errInvalidConfig) {
+		return 1 // the findings are printed already
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, term.Red("makit shield: "+err.Error()))

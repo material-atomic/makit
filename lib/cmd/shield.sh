@@ -87,7 +87,7 @@ cmd_shield() {
   local sub=${1:-status}; shift || true
   case "$sub" in
     --help|help)
-      echo "makit shield on [--observe] | off | status | edit | uninstall
+      echo "makit shield on [--observe] | off | status | edit (checked before it is saved) | uninstall
 makit shield ask on|off      Caddy/nginx ask makit before each request (/check); off = always allow
 makit shield edge on|off     makit in front of Caddy/nginx (the listeners in $SHIELD_CONF)
 makit shield mode block|observe
@@ -97,6 +97,7 @@ makit shield sites           per-domain settings (sites: in shield.yaml) over th
 makit shield report          the latest batch report (sent through makit notify when it matters)
 makit shield analyze FILE    score an nginx/Caddy access log with the same policy
 makit shield customize …     your own copy of the scoring set, bot catalog or rules
+makit shield config check [FILE] [--replay LOG]   check a config before it is loaded; --replay shows what it would change
 Blocks IPs from its own set (no ipset), Cloudflare-aware: behind Cloudflare it reads the visitor's IP from
 CF-Connecting-IP, but only when the connection really comes from Cloudflare. Two ways to use it:
   · Caddy/nginx ask makit before each request (makit shield snippet caddy|nginx)
@@ -136,10 +137,25 @@ Docs: makit docs shield"; return ;;
       shield_set mode "$v"; ok "mode $v"
       ;;
     edit)
-      require_root
+      require_root; require_core
       [[ -f $SHIELD_CONF ]] || { shield_default_config | write_file "$SHIELD_CONF" 0640; }
-      "${EDITOR:-vi}" "$SHIELD_CONF"
-      run systemctl reload makit-shield 2>/dev/null || true
+      # Edit a copy; it replaces the config only once makit shield config check finds no error, so a typo never
+      # reaches the running shield.
+      local tmp; tmp=$(mktemp "$SHIELD_CONF.edit.XXXXXX")
+      cp -p "$SHIELD_CONF" "$tmp"
+      while :; do
+        "${EDITOR:-vi}" "$tmp"
+        if cmp -s "$tmp" "$SHIELD_CONF"; then rm -f "$tmp"; info "no change"; return 0; fi
+        if MAKIT_SECURITY=$(security_dirs) "$MAKIT_CORE" shield config check "$tmp"; then
+          mv "$tmp" "$SHIELD_CONF"
+          systemctl reload makit-shield 2>/dev/null || true
+          ok "saved $SHIELD_CONF — the running shield loads it within 2 s"
+          return 0
+        fi
+        [[ -t 0 ]] && confirm "Edit it again?" && continue
+        warn "$SHIELD_CONF is unchanged; your edit is kept in $tmp"
+        return 1
+      done
       ;;
     uninstall)
       require_root

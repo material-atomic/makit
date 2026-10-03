@@ -25,45 +25,52 @@ var Version = "dev"
 
 // buildPolicy loads config, state, rules and (when lists is nil) the bulk lists into a policy.
 func buildPolicy(cfg *Config, dirs []string, lists *Set) (*Policy, *State, error) {
-	trusted, err := cfg.Trusted()
-	if err != nil {
-		return nil, nil, err
-	}
 	st, err := LoadState()
 	if err != nil {
 		return nil, nil, err
 	}
-	allow, block, siteAllow, siteBlock := st.SiteSets(cfg.Allow)
 	if lists == nil {
 		if lists, _, err = LoadLists(); err != nil {
 			return nil, nil, err
 		}
 	}
+	p, err := buildPolicyWith(cfg, dirs, st, lists)
+	return p, st, err
+}
+
+// buildPolicyWith builds the policy from a config, the catalog directories, a state and the bulk lists, reading
+// nothing else from disk.
+func buildPolicyWith(cfg *Config, dirs []string, st *State, lists *Set) (*Policy, error) {
+	trusted, err := cfg.Trusted()
+	if err != nil {
+		return nil, err
+	}
+	allow, block, siteAllow, siteBlock := st.SiteSets(cfg.Allow)
 	p := &Policy{Observe: cfg.Mode == "observe", Pass: cfg.Mode == "pass", Trusted: trusted, Allow: allow, Block: block, Lists: lists}
 	if cfg.Rules {
 		if p.Rules, err = LoadHTTPRules(dirs); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if cfg.Scoring.Enabled == nil || *cfg.Scoring.Enabled {
 		if p.Scoring, err = LoadScoring(dirs, cfg.Scoring.File, cfg.Scoring.ScoringOverrides); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if b := cfg.Bots; b.Enabled == nil || *b.Enabled {
 		if p.Bots, err = LoadBotsConfig(dirs, b); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if b.Score.Enabled == nil || *b.Score.Enabled {
 			if p.BotScore, err = LoadScoringSet(dirs, "bots.yaml", b.ScoreFile, b.Score); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 	}
 	if err := buildSites(p, cfg, dirs, siteAllow, siteBlock); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return p, st, nil
+	return p, nil
 }
 
 // buildSites derives one policy per site from the global one: what a site sets wins, the rest is inherited.
@@ -327,6 +334,12 @@ func Serve(cfgPath string, dirs []string) error {
 		c, err := LoadConfig(cfgPath)
 		if err != nil {
 			return err
+		}
+		// What loads but probably does not do what was meant (a misspelt key is ignored): said in the log.
+		if b, err := os.ReadFile(cfgPath); err == nil {
+			for _, i := range CheckConfig(b, CheckOptions{}) {
+				log.Printf("shield: config %s: %s (makit shield config check)", i.Level, i)
+			}
 		}
 		listsChanged := false
 		if fp := listsFingerprint(); lists == nil || fp != listsFP {

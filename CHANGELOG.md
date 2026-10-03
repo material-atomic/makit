@@ -16,6 +16,13 @@
   an AWS NLB or HAProxy in front keeps TLS at makit and makit still sees the visitor. Bans apply at accept, before
   TLS; a visitor's own PROXY line is never believed; headers are read off the accept loop with a 5 s limit; TLVs are
   skipped; malformed headers are dropped and counted.
+- `makit shield config check [FILE|-] [--json]`: every error that would stop the gate loading a config, and every setting
+  that loads but does nothing or harm — a misspelt key with the right name suggested, wrong value kinds, two listeners
+  on a port, wildcard ACME names, trusted ranges anyone is in, `kernel_block` behind a load balancer, unknown notify
+  channels, rules/scoring/bot settings the catalog rejects — with line numbers. `--replay LOG` runs a real access
+  log through the current and the new config and lists what changes, by rule, with likely false positives (a browser
+  the app answered 2xx/3xx) first; nothing is written. `makit shield edit` saves only a file that passes; the gate
+  logs the warnings when it reloads.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

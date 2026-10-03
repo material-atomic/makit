@@ -149,12 +149,24 @@ func (r ReportConfig) Directory() string {
 }
 
 func LoadConfig(path string) (*Config, error) {
-	c := &Config{Mode: "observe", Ask: true, ClientHeader: "CF-Connecting-IP", TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
-	c.Snapshot.Path, c.Snapshot.MaxMB, c.Snapshot.Keep = "/var/log/makit/shield/requests.jsonl", 50, 5
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return ParseConfig(b, path)
+}
+
+// defaultConfig is what a key left out of shield.yaml means.
+func defaultConfig() *Config {
+	c := &Config{Mode: "observe", Ask: true, ClientHeader: "CF-Connecting-IP", TrustedProxies: []string{"cloudflare"}, Rules: true, Admin: "127.0.0.1:9180", KernelBlock: false}
+	c.Snapshot.Path, c.Snapshot.MaxMB, c.Snapshot.Keep = "/var/log/makit/shield/requests.jsonl", 50, 5
+	return c
+}
+
+// ParseConfig reads shield.yaml from bytes; path only names it in errors. Unknown keys are ignored here (the running
+// gate keeps working with an older or newer file); makit shield config check reports them.
+func ParseConfig(b []byte, path string) (*Config, error) {
+	c := defaultConfig()
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

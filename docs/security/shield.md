@@ -287,6 +287,45 @@ Caddy's JSON access log is read as is, request headers included (cookies and aut
 codes count in log analysis (many 4xx, the app answering 5xx to probes), and claimed bots are verified by reverse DNS
 (`--verify=false` for speed). Without `--ban` nothing is written; with it, bans go to the same list the gate uses.
 
+## Checking a config before it is loaded
+
+`makit shield edit` opens a copy of `shield.yaml` and saves it only when nothing in it is wrong; a file you write
+yourself, paste from the playground or ship with Ansible can be checked the same way:
+
+```bash
+makit shield config check                       # /etc/makit/shield.yaml
+makit shield config check new.yaml              # or - for stdin
+makit shield config check new.yaml --json       # for CI
+```
+
+It reports, with the line:
+
+- **errors** — the gate would refuse the file, or a setting does nothing: YAML syntax, a misspelt key (`trusted_proxy:`
+  is ignored by the gate, so the check says so and suggests `trusted_proxies`), a value of the wrong kind, an allow
+  entry that is not an IP, two listeners on one port, a wildcard in `acme`, a missing certificate file, a trusted range
+  anyone is in (`0.0.0.0/0`), a site without `match`, and anything the rules, scoring set or bot catalog reject (an
+  unknown action or level);
+- **warnings** — it loads, but probably not as meant: `kernel_block` behind a load balancer, `client_ip_header`
+  without trusted proxies, `accept_proxy_protocol` with nothing trusted, an admin address reachable from outside,
+  `mode: pass`, a report sent to a `makit notify` channel that does not exist.
+
+Exit status 1 when there is an error. The running gate never loads a file it cannot read (it keeps the previous
+policy) and logs the same warnings when it reloads one.
+
+### What would a new config block? `--replay`
+
+```bash
+makit shield config check new.yaml --replay /var/log/nginx/access.log
+```
+
+runs every request of a real access log through the current config and the new one and lists what changes:
+requests and clients that go from allowed to blocked or limited and back, the rules responsible, and examples. Both
+are enforced for the comparison (observe mode reads as block), bans are kept in memory and last in log time, bots are
+checked against the downloaded ranges without DNS — nothing is written, banned or sent. A newly stopped request from a
+browser that the app answered with 2xx or 3xx is flagged as a **likely false positive**: look at those before loading
+the file. `--against FILE` compares with another config than `/etc/makit/shield.yaml`; `--format nginx|caddy` when the
+log is not recognised.
+
 ## Snapshots
 
 Each decision is a JSON line in `/var/log/makit/shield/requests.jsonl` (rotated): time, client IP, peer, proxy,
