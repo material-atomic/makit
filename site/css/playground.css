@@ -64,3 +64,7 @@ input.mono, textarea.mono { font-family: var(--mono); font-size: 13px; }
   .pg-out { position: static; }
   .editor textarea { min-height: 300px; }
 }
+
+/* Shown only when the browser offers WebMCP and the tools registered. */
+.webmcp { margin: -8px 0 18px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--bg-soft); border-radius: 0 8px 8px 0; font-size: 14px; color: var(--fg-dim); max-width: 860px; }
+.webmcp b { color: var(--fg); font-family: var(--mono); font-weight: 600; }

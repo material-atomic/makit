@@ -279,13 +279,16 @@ function listenersBlock() {
 // ── the check ──
 let timer = null;
 function scheduleCheck() { clearTimeout(timer); timer = setTimeout(runCheck, 150); }
+// A config for replicas runs in pods: listening on every address is right there.
+function checkYaml(src, kubernetes) {
+  let res;
+  try { res = JSON.parse(globalThis.makitCheck(src, { kubernetes })); } catch (e) { res = { valid: false, issues: [{ level: 'error', message: String(e) }] }; }
+  res.issues = res.issues || [];
+  return res;
+}
 function runCheck() {
   if (!ready) return;
-  const src = $('#yaml').value;
-  let res;
-  // A config for replicas runs in pods: listening on every address is right there.
-  try { res = JSON.parse(globalThis.makitCheck(src, { kubernetes: !!cfg.cluster })); } catch (e) { res = { valid: false, issues: [{ level: 'error', message: String(e) }] }; }
-  res.issues = res.issues || [];
+  const res = checkYaml($('#yaml').value, !!cfg.cluster);
   const errs = res.issues.filter((i) => i.level === 'error').length;
   const warns = res.issues.length - errs;
   const st = $('#status');
@@ -320,16 +323,19 @@ function download(name, body) {
   document.body.append(a); a.click(); a.remove();
 }
 const indent = (s, n) => s.split('\n').map((l) => (l ? ' '.repeat(n) + l : l)).join('\n');
+const EXPORTS = {
+  file: { name: 'shield.yaml', build: (y) => y },
+  configmap: { name: 'makit-shield-config.yaml', build: (y) => `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: makit-shield\n  namespace: makit\ndata:\n  shield.yaml: |\n${indent(y, 4)}` },
+  helm: { name: 'values.yaml', build: () => {
+    const c = structuredClone(cfg); delete c.cluster; // the chart fills cluster: in
+    return `# helm upgrade --install shield deploy/helm/makit-shield -n makit -f values.yaml\nconfig:\n${indent(dump(c), 2)}`;
+  } },
+};
 document.querySelector('#tab-shield .export').addEventListener('click', (e) => {
   const kind = e.target.dataset.export;
   if (!kind) return;
   const y = $('#yaml').value;
-  if (kind === 'file') download('shield.yaml', y);
-  if (kind === 'configmap') download('makit-shield-config.yaml', `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: makit-shield\n  namespace: makit\ndata:\n  shield.yaml: |\n${indent(y, 4)}`);
-  if (kind === 'helm') {
-    const c = structuredClone(cfg); delete c.cluster; // the chart fills cluster: in
-    download('values.yaml', `# helm upgrade --install shield deploy/helm/makit-shield -n makit -f values.yaml\nconfig:\n${indent(dump(c), 2)}`);
-  }
+  if (EXPORTS[kind]) download(EXPORTS[kind].name, EXPORTS[kind].build(y));
   if (kind === 'copy') copyText(y, e.target);
 });
 
@@ -378,11 +384,7 @@ document.querySelector('#tab-notify .export').addEventListener('click', (e) => {
 });
 
 // ── tabs and presets ──
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
-  $('#tab-shield').hidden = t.dataset.tab !== 'shield';
-  $('#tab-notify').hidden = t.dataset.tab !== 'notify';
-}));
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
 Object.keys(PRESETS).forEach((name, i) => {
   $('#presets').append(el('button', { class: 'preset' + (i ? '' : ' on'), onclick: (e) => {
     document.querySelectorAll('.preset').forEach((p) => p.classList.toggle('on', p === e.target));
@@ -390,10 +392,140 @@ Object.keys(PRESETS).forEach((name, i) => {
   } }, name));
 });
 
+// ── WebMCP: the same check, offered as tools to an AI agent in the visitor's browser ──
+// Where the browser has WebMCP (document.modelContext; navigator.modelContext in early builds), an agent the visitor
+// runs can check a shield.yaml, read and edit the one on the page, load a preset, read the catalog and export —
+// all of it in this page, like the buttons. Nothing is sent anywhere, and nothing reaches a server: the visitor
+// still copies the file to /etc/makit/shield.yaml.
+let checkerReady;
+const checker = new Promise((ok, fail) => { checkerReady = { ok, fail }; });
+checker.catch(() => {});
+const toolText = (o) => ({ content: [{ type: 'text', text: typeof o === 'string' ? o : JSON.stringify(o, null, 2) }] });
+const summary = (yaml, res) => ({ yaml, valid: res.valid, errors: res.issues.filter((i) => i.level === 'error').length,
+  warnings: res.issues.filter((i) => i.level !== 'error').length, issues: res.issues, makit: res.version });
+function editorCheck() {
+  const y = $('#yaml').value;
+  return summary(y, checkYaml(y, !!cfg.cluster));
+}
+const CATALOG_SECTIONS = { bots: 'bot_categories', agents: 'bot_agents', scoring_http: 'score_http', scoring_bots: 'score_bots', rules: 'rules' };
+const WEBMCP_TOOLS = [
+  {
+    name: 'makit_check_shield_config',
+    title: 'Check a makit shield.yaml',
+    description: 'Checks a shield.yaml for makit\'s request shield with makit\'s own config check (Go compiled to WebAssembly, '
+      + 'bundled catalog) — the same errors and warnings, with line numbers, as `makit shield config check` on a server. '
+      + 'Errors mean makit would refuse the file; warnings mean it loads but probably not as meant. Runs in this page; '
+      + 'nothing is sent anywhere. Without yaml, checks the config shown on the page.',
+    inputSchema: { type: 'object', properties: {
+      yaml: { type: 'string', description: 'The shield.yaml to check. Omit to check the one on the page.' },
+      kubernetes: { type: 'boolean', description: 'The config runs in Kubernetes pods (listening on every address is expected there). Default: true when it has cluster:.' },
+    } },
+    annotations: { readOnlyHint: true },
+    async execute({ yaml, kubernetes } = {}) {
+      await checker;
+      if (yaml == null) return toolText(editorCheck());
+      let k8s = kubernetes;
+      if (k8s == null) { try { k8s = !!(jsyaml.load(yaml) || {}).cluster; } catch { k8s = false; } }
+      return toolText(summary(yaml, checkYaml(yaml, k8s)));
+    },
+  },
+  {
+    name: 'makit_get_shield_config',
+    title: 'Read the shield.yaml on the page',
+    description: 'Returns the shield.yaml currently in the playground editor and its check result (valid, errors, warnings, issues with line numbers).',
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true },
+    async execute() { await checker; return toolText(editorCheck()); },
+  },
+  {
+    name: 'makit_set_shield_config',
+    title: 'Put a shield.yaml in the page editor',
+    description: 'Replaces the shield.yaml in the playground editor (the builder blocks follow) and returns its check result. '
+      + 'Changes only this page: nothing is saved or sent, and the person still downloads or copies the file. '
+      + 'Use makit_check_shield_config first to try a version without replacing theirs.',
+    inputSchema: { type: 'object', properties: { yaml: { type: 'string', description: 'The whole shield.yaml.' } }, required: ['yaml'] },
+    async execute({ yaml }) {
+      let o;
+      try { o = jsyaml.load(yaml); } catch { o = null; }
+      $('#yaml').value = yaml;
+      if (o && typeof o === 'object' && !Array.isArray(o)) { cfg = o; renderBlocks(); }
+      showTab('shield');
+      await checker;
+      runCheck();
+      return toolText(editorCheck());
+    },
+  },
+  {
+    name: 'makit_load_preset',
+    title: 'Start from a playground preset',
+    description: 'Replaces the config on the page with one of the playground\'s starting points and returns it with its check result.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', enum: Object.keys(PRESETS) } }, required: ['name'] },
+    async execute({ name }) {
+      if (!PRESETS[name]) return toolText(`Unknown preset. One of: ${Object.keys(PRESETS).join(', ')}`);
+      document.querySelectorAll('.preset').forEach((p) => p.classList.toggle('on', p.textContent === name));
+      setCfg(structuredClone(PRESETS[name]));
+      showTab('shield');
+      await checker;
+      runCheck();
+      return toolText(editorCheck());
+    },
+  },
+  {
+    name: 'makit_catalog',
+    title: 'Read makit\'s bundled catalog',
+    description: 'What a shield.yaml can refer to, from the catalog bundled with this makit version: bot categories with their '
+      + 'default actions (bots), known bot agents and their ids (agents), request-scoring levels, thresholds, default actions, '
+      + 'profiles and signal ids (scoring_http, scoring_bots), and HTTP rule ids (rules).',
+    inputSchema: { type: 'object', properties: { section: { type: 'string', enum: ['all', ...Object.keys(CATALOG_SECTIONS)], description: 'Default: all.' } } },
+    annotations: { readOnlyHint: true },
+    async execute({ section = 'all' } = {}) {
+      await checker;
+      if (section === 'all') return toolText(catalog);
+      const key = CATALOG_SECTIONS[section];
+      const out = { version: catalog.version, [section]: catalog[key] };
+      if (section === 'bots') out.spoofed = catalog.spoofed;
+      return toolText(out);
+    },
+  },
+  {
+    name: 'makit_export_shield_config',
+    title: 'Export the shield.yaml on the page',
+    description: 'Returns the config on the page as a file to install: shield.yaml (for /etc/makit/shield.yaml), a Kubernetes '
+      + 'ConfigMap, or values for the makit-shield Helm chart. Nothing is downloaded or sent.',
+    inputSchema: { type: 'object', properties: { format: { type: 'string', enum: Object.keys(EXPORTS) } }, required: ['format'] },
+    annotations: { readOnlyHint: true },
+    async execute({ format }) {
+      const e = EXPORTS[format];
+      if (!e) return toolText(`Unknown format. One of: ${Object.keys(EXPORTS).join(', ')}`);
+      return toolText({ filename: e.name, content: e.build($('#yaml').value) });
+    },
+  },
+];
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
+  $('#tab-shield').hidden = name !== 'shield';
+  $('#tab-notify').hidden = name !== 'notify';
+}
+async function offerWebMCP() {
+  const mc = document.modelContext || navigator.modelContext;
+  if (!mc || typeof mc.registerTool !== 'function') return;
+  const stop = new AbortController();
+  let n = 0;
+  for (const t of WEBMCP_TOOLS) {
+    try { await mc.registerTool(t, { signal: stop.signal }); n++; } catch (e) { console.warn('WebMCP:', t.name, e); }
+  }
+  if (!n) return;
+  addEventListener('pagehide', () => stop.abort(), { once: true });
+  $('.pg-head .sub').after(el('p', { class: 'webmcp' }, el('b', {}, 'WebMCP'),
+    ` — your browser's AI agent can use ${n} tools here: check a shield.yaml, read and edit this one, load a preset, `
+    + 'read the catalog, export. They run in this page, like the buttons; nothing is sent.'));
+}
+
 // ── start: the page works at once; the check and the catalog arrive with the WebAssembly ──
 setCfg(structuredClone(PRESETS['Single site']));
 renderChFields();
 renderChannels();
+offerWebMCP();
 (async () => {
   try {
     await new Promise((ok, fail) => { const s = el('script', { src: WASM_BASE + 'wasm_exec.js' }); s.onload = ok; s.onerror = fail; document.head.append(s); });
@@ -404,9 +536,11 @@ renderChannels();
     go.run(instance);
     catalog = JSON.parse(globalThis.makitCatalog());
     ready = true;
+    checkerReady.ok();
     renderBlocks();
     runCheck();
   } catch (e) {
+    checkerReady.fail(new Error(`makit's config check did not load (${e.message})`));
     $('#status').className = 'status err';
     $('#status-text').textContent = `Could not load makit's config check (${e.message}). The YAML still builds; check it on the server with makit shield config check.`;
   }

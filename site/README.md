@@ -9,6 +9,12 @@ page loads it through jsDelivr. At a release, upload these three files next to t
 - `js/playground.js`
 - `css/playground.css`
 
+Where the browser has WebMCP (`document.modelContext`; Chrome 154 with the "WebMCP for testing" flag, or
+`--enable-features=WebMCP`), the playground also offers its check to the visitor's AI agent as tools:
+`makit_check_shield_config`, `makit_get_shield_config`, `makit_set_shield_config`, `makit_load_preset`, `makit_catalog`
+and `makit_export_shield_config`. They run in the page like the buttons do — nothing is sent anywhere — and a note under
+the title says so only when they registered. Elsewhere the page is unchanged.
+
 Also kept here, as uploaded to makit.sh: `css/style.css` (the whole site, dark only) and `js/shots.js` (the 3D carousel
 of terminal captures on the home page; the images come from `docs/img/terminal/web/` through jsDelivr).
 
