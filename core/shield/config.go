@@ -61,6 +61,8 @@ type Config struct {
 	// BanScope of automatic bans: server (every site) or site (only the site that was attacked). Sites override it.
 	BanScope string       `yaml:"ban_scope"`
 	Sites    []SiteConfig `yaml:"sites"` // per-domain settings over the global ones above
+	// Cluster: replicas behind a load balancer share bans, allow entries, rate limits and scores.
+	Cluster ClusterConfig `yaml:"cluster"`
 }
 
 // SiteConfig is one site (domain) with what differs from the global settings: single values replace them, maps

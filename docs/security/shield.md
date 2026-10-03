@@ -100,6 +100,44 @@ the accept loop with a 5-second limit, so a stalled connection cannot hold up th
 dropped and counted as `proxy-protocol-error` in `makit shield status`. With an NLB that preserves client IPs (IP
 targets, no PROXY protocol), the connection already comes from the visitor and nothing needs to be set.
 
+## Several replicas behind one load balancer
+
+Behind a load balancer, requests from one visitor land on any replica. Each replica alone would count only its share:
+a rate limit of 60 a minute would let 60 × N through, and a scan spread over the pods would never escalate. With
+`cluster:` the replicas share what they learn:
+
+```yaml
+cluster:
+  listen: ":9181"                                   # inside the cluster only
+  peers: ["dns:makit-shield-headless.makit.svc.cluster.local:9181"]   # or host:port, one per replica
+  # secret: MAKIT_CLUSTER_SECRET in the environment (a Kubernetes Secret), or secret_file: /etc/makit/cluster.key
+  sync: 1s
+```
+
+- **Bans, unbans and allow entries** — automatic ones and those made with `makit shield ban/allow` on any replica —
+  reach every replica within about one sync interval (≈0.4 s in tests with `sync: 100ms`).
+- **Rate limits** count across replicas: windows are aligned on the clock, and each replica adds the others' counts to
+  its own, so `limit 60/1m` stays 60 a minute for the whole cluster, give or take one sync interval of requests.
+- **Request scores** add up across replicas (suspicious requests, bursts), so a scan spread over the pods escalates
+  and is banned as if it hit one.
+- A replica that starts copies the bans and allow entries of a running one first.
+
+**A decision never waits on the network.** Each replica decides from its own memory; changes travel in the background.
+Measured: deciding a request costs the same with and without a cluster (6.3–6.6 µs, 18 allocations, on the shared
+benchmark — `go test ./shield -bench DecideCluster`, Apple M1). If a peer cannot be reached, list changes wait for it
+(up to 200,000) and counts are dropped: they matter only for the current window.
+
+**What an attacker inside the network cannot do.** Every message is signed (HMAC-SHA256 with the shared secret, at
+least 32 characters: `openssl rand -hex 32`) over its time and body and carries a sequence number. A forged message,
+one older than 30 seconds, or a replayed one is refused and counted — otherwise anyone who reaches port 9181 could
+inflate a visitor's count to get it banned, or unban an attacker. Clocks must agree within 30 seconds (NTP; every
+cloud provides it). The listen port carries ban lists in clear text: keep it inside the cluster (a NetworkPolicy
+allowing only the makit pods).
+
+Peers listed by `dns:` are looked up every 15 seconds, so pods that come and go are followed; a replica finds its own
+address in the list and leaves it out. `makit shield status` lists the peers and how far each is behind; `/metrics`
+has `makit_shield_cluster_peer_sync_age_seconds` and the refused messages. Changing `cluster:` needs a restart.
+
 ## The set and the allowlist
 
 ```bash

@@ -245,6 +245,25 @@ func (g *Gate) metricsHandler(cfg func() *Config) http.Handler {
 		p.head("makit_shield_start_time_seconds", "gauge", "When the gate started.")
 		p.sample("makit_shield_start_time_seconds", float64(m.started.Unix()))
 
+		if cl := g.cluster; cl != nil {
+			peers := cl.Peers()
+			p.head("makit_shield_cluster_peers", "gauge", "Other replicas this one sends its changes to.")
+			p.sample("makit_shield_cluster_peers", float64(len(peers)))
+			p.head("makit_shield_cluster_peer_sync_age_seconds", "gauge", "Seconds since a peer last took this replica's changes (-1: never).")
+			p.head("makit_shield_cluster_peer_pending_ops", "gauge", "List changes waiting for a peer that does not answer.")
+			for _, ps := range peers {
+				age := -1.0
+				if !ps.LastOK.IsZero() {
+					age = time.Since(ps.LastOK).Seconds()
+				}
+				p.sample("makit_shield_cluster_peer_sync_age_seconds", age, "peer", ps.Addr)
+				p.sample("makit_shield_cluster_peer_pending_ops", float64(ps.Pending), "peer", ps.Addr)
+			}
+			p.head("makit_shield_cluster_messages_total", "counter", "Messages from other replicas, by result (refused: bad signature, old or replayed).")
+			p.sample("makit_shield_cluster_messages_total", float64(cl.recvd.Load()), "result", "applied")
+			p.sample("makit_shield_cluster_messages_total", float64(cl.refused.Load()), "result", "refused")
+		}
+
 		samples := []metrics.Sample{{Name: "/sched/goroutines:goroutines"}, {Name: "/memory/classes/heap/objects:bytes"},
 			{Name: "/memory/classes/total:bytes"}}
 		metrics.Read(samples)

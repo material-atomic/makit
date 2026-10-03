@@ -27,6 +27,13 @@
   events, set sizes, reloads, Go memory), `/healthz` and `/readyz` on the admin address. ~32 ns per request, no
   allocation, striped counters (same cost on 1 and 8 cores). `/status` reads the config in force (it raced with
   reloads before).
+- `makit shield` cluster: replicas behind a load balancer share bans, unbans, allow entries, rate limits and request
+  scores (`cluster:` with `listen`, `peers` — static or `dns:` for a headless Service — and a shared secret). Limits use
+  windows aligned on the clock and add the other replicas' counts, so `limit 60/1m` stays 60 for the cluster; a scan
+  spread over pods escalates as on one. A decision never waits on the network: the request path costs the same with and
+  without a cluster (6.3–6.6 µs, 18 allocations). Messages are HMAC-signed with a time and sequence number; forged,
+  old and replayed ones are refused. New replicas copy the bans of a running one. Peers in `makit shield status` and
+  `/metrics`.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

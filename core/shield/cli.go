@@ -410,6 +410,15 @@ func cmdStatus(cfgPath string, args []string) error {
 		Trusted     int              `json:"trusted"`
 		Listeners   int              `json:"listeners"`
 		KernelBlock bool             `json:"kernel_block"`
+		Cluster     *struct {
+			Node  string `json:"node"`
+			Peers []struct {
+				Addr    string    `json:"addr"`
+				LastOK  time.Time `json:"last_ok"`
+				Error   string    `json:"error"`
+				Pending int       `json:"pending"`
+			} `json:"peers"`
+		} `json:"cluster"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&s); err != nil {
 		return fmt.Errorf("gate on %s answered something unexpected: %w", cfg.Admin, err)
@@ -442,6 +451,25 @@ func cmdStatus(cfgPath string, args []string) error {
 		parts = []string{term.Dim("no requests yet")}
 	}
 	fmt.Printf("  %s %s\n", term.Dim("requests"), strings.Join(parts, " · "))
+	if cl := s.Cluster; cl != nil {
+		fmt.Printf("  %s %s %s\n", term.Dim("cluster "), term.Bold(cl.Node), term.Dim(fmt.Sprintf("· %d peers", len(cl.Peers))))
+		for _, p := range cl.Peers {
+			state := term.Green("in sync")
+			switch {
+			case p.Error != "":
+				state = term.Red("unreachable: " + p.Error)
+			case p.LastOK.IsZero():
+				state = term.Yellow("not reached yet")
+			case time.Since(p.LastOK) > 15*time.Second:
+				state = term.Yellow(fmt.Sprintf("last sync %s ago", time.Since(p.LastOK).Round(time.Second)))
+			}
+			pending := ""
+			if p.Pending > 0 {
+				pending = term.Yellow(fmt.Sprintf(" · %d changes waiting", p.Pending))
+			}
+			fmt.Printf("           %-22s %s%s\n", p.Addr, state, pending)
+		}
+	}
 	return nil
 }
 

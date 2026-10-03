@@ -496,6 +496,91 @@ type Tracker struct {
 	ips map[trackKey]*ipState
 	max int
 	sc  *Scoring
+	// With a cluster, what each IP did here since the last sync (out) goes to the other replicas, and what it did
+	// there is added in: a scan spread across replicas escalates as if it hit one.
+	share bool
+	dirty []trackKey // IPs with activity not sent yet (ipState.out)
+}
+
+// ScoreDelta is what one IP did on one replica since the last sync, within its scoring window.
+type ScoreDelta struct {
+	IP         netip.Addr     `json:"ip"`
+	Site       string         `json:"site,omitempty"`
+	Set        string         `json:"set"` // http or bots: which tracker
+	First      time.Time      `json:"first"`
+	Last       time.Time      `json:"last"`
+	Count      int            `json:"n"`
+	Suspicious int            `json:"sus,omitempty"`
+	MaxScore   int            `json:"max,omitempty"`
+	Bursts     map[string]int `json:"bursts,omitempty"`
+	Signals    map[string]int `json:"signals,omitempty"`
+}
+
+// Share starts keeping local activity for TakeDeltas.
+func (t *Tracker) Share() {
+	t.mu.Lock()
+	t.share = true
+	t.mu.Unlock()
+}
+
+// TakeDeltas returns the activity since the last call, tagged with set, and starts over.
+func (t *Tracker) TakeDeltas(set string) []ScoreDelta {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]ScoreDelta, 0, len(t.dirty))
+	for _, k := range t.dirty {
+		st := t.ips[k]
+		if st == nil || !st.dirty {
+			continue
+		}
+		d := ScoreDelta{IP: k.ip, Site: k.site, Set: set, First: st.first, Last: st.uLast, Count: st.uCount,
+			Suspicious: st.uSus, MaxScore: st.uMax}
+		for i, n := range st.uBursts {
+			if n > 0 && i < len(t.sc.Bursts) {
+				if d.Bursts == nil {
+					d.Bursts = map[string]int{}
+				}
+				d.Bursts[t.sc.Bursts[i].ID] = n
+				st.uBursts[i] = 0
+			}
+		}
+		out = append(out, d)
+		st.dirty, st.uCount, st.uSus, st.uMax = false, 0, 0, 0
+	}
+	t.dirty = t.dirty[:0]
+	return out
+}
+
+// Merge adds another replica's activity to each IP's history, within the scoring window.
+func (t *Tracker) Merge(ds []ScoreDelta) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, d := range ds {
+		k := trackKey{d.IP, d.Site}
+		st := t.ips[k]
+		if st == nil || d.Last.Sub(st.first) > t.sc.Window {
+			if d.Last.Sub(d.First) > t.sc.Window {
+				continue
+			}
+			if st == nil && len(t.ips) >= t.max {
+				t.evict(d.Last)
+			}
+			st = &ipState{first: d.First, bursts: map[string]int{}, signals: map[string]int{}}
+			t.ips[k] = st
+		}
+		if d.Last.After(st.last) {
+			st.last = d.Last
+		}
+		st.count += d.Count
+		st.suspicious += d.Suspicious
+		st.maxScore = max(st.maxScore, d.MaxScore)
+		for id, n := range d.Bursts {
+			st.bursts[id] += n
+		}
+		for id, n := range d.Signals {
+			st.signals[id] += n
+		}
+	}
 }
 
 type ipState struct {
@@ -505,6 +590,11 @@ type ipState struct {
 	maxScore    int
 	bursts      map[string]int
 	signals     map[string]int
+	// Activity here not sent to the other replicas yet: plain counters, so a request allocates nothing for it.
+	dirty              bool
+	uCount, uSus, uMax int
+	uBursts            []int // by index in the scoring set's bursts
+	uLast              time.Time
 }
 
 func NewTracker(sc *Scoring, max int) *Tracker {
@@ -542,24 +632,43 @@ func (t *Tracker) ObserveIn(site string, ip netip.Addr, reqScore int, signals []
 	st.last = at
 	st.count++
 	st.maxScore = max(st.maxScore, reqScore)
+	if t.share {
+		if !st.dirty {
+			st.dirty = true
+			t.dirty = append(t.dirty, k)
+		}
+		st.uLast, st.uMax = at, max(st.uMax, reqScore)
+		st.uCount++
+	}
 	if reqScore >= t.sc.Escalation.MinScore && reqScore > 0 {
 		st.suspicious++
+		if t.share {
+			st.uSus++
+		}
 	}
 	for _, s := range signals {
-		st.signals[strings.SplitN(s, "+", 2)[0]]++
+		st.signals[strings.SplitN(s, "+", 2)[0]]++ // signals name what was seen, for reports: not shared
 	}
 	score := st.maxScore
 	if t.sc.Escalation.Every > 0 {
 		score += t.sc.Escalation.Add * (st.suspicious / t.sc.Escalation.Every)
 	}
 	var fired []string
-	for _, b := range t.sc.Bursts {
+	for i, b := range t.sc.Bursts {
 		matched := b.re == nil
 		if b.re != nil && b.Field == "status" && status > 0 {
 			matched = b.re.MatchString(strconv.Itoa(status))
 		}
 		if matched {
 			st.bursts[b.ID]++
+			if t.share {
+				if st.uBursts == nil {
+					st.uBursts = make([]int, len(t.sc.Bursts))
+				}
+				if i < len(st.uBursts) {
+					st.uBursts[i]++
+				}
+			}
 		}
 		if st.bursts[b.ID] >= b.Count {
 			score += b.Score

@@ -106,6 +106,16 @@ func (p *Policy) Sites() []*Policy { return p.sites }
 // SiteBlockSet is the set holding a site's own bans (nil for an unknown site).
 func (p *Policy) SiteBlockSet(site string) *Set { return p.siteSets[site] }
 
+// siteAllowSet is a site's own allowlist (nil for an unknown site).
+func (p *Policy) siteAllowSet(site string) *Set {
+	for _, sp := range p.sites {
+		if sp.Site == site {
+			return sp.SiteAllow
+		}
+	}
+	return nil
+}
+
 // Share hands the global policy's per-process parts (trackers, verifier, limiter, ban function) to every site.
 // Call it after setting them.
 func (p *Policy) Share() {

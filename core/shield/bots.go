@@ -493,33 +493,111 @@ func (v *Verifier) rdns(a *Agent, ip netip.Addr) string {
 type Limiter struct {
 	mu sync.Mutex
 	m  map[string]*window
+	// With a cluster, the requests counted here since the last sync are kept for the other replicas (out), and
+	// theirs are added to each window (remote): limit 60/1m holds across every replica, not per replica.
+	share bool
+	dirty []string // keys whose window has unsent counts
 }
 
+// window is a fixed window aligned on the clock (now / duration), so every replica counts into the same one.
 type window struct {
-	start time.Time
-	n     int
+	idx       int64
+	end       time.Time
+	dur       time.Duration
+	n, remote int
+	unsent    int // counted here, not sent to the other replicas yet
+}
+
+// LimitDelta is a count of requests in one window of one limit key, exchanged between replicas.
+type LimitDelta struct {
+	Key string        `json:"k"`
+	Idx int64         `json:"w"`
+	Dur time.Duration `json:"d"`
+	N   int           `json:"n,omitempty"`
 }
 
 func NewLimiter() *Limiter { return &Limiter{m: map[string]*window{}} }
 
-// Allow counts one request and reports whether it is within the limit.
-func (l *Limiter) Allow(key string, act Act, now time.Time) bool {
+// Share starts keeping local counts for TakeDeltas.
+func (l *Limiter) Share() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.share = true
+	l.mu.Unlock()
+}
+
+func windowOf(now time.Time, dur time.Duration) (int64, time.Time) {
+	if dur <= 0 {
+		dur = time.Second
+	}
+	idx := now.UnixNano() / int64(dur)
+	return idx, time.Unix(0, (idx+1)*int64(dur))
+}
+
+// cur returns key's window for idx, starting a new one when the old one is over. Call with mu held.
+func (l *Limiter) cur(key string, idx int64, end, now time.Time, dur time.Duration) *window {
 	w := l.m[key]
-	if w == nil || now.Sub(w.start) >= act.Dur {
+	if w == nil || w.idx < idx {
 		if w == nil && len(l.m) >= 200000 {
 			for k, x := range l.m {
-				if now.Sub(x.start) > time.Hour {
+				if now.After(x.end) {
 					delete(l.m, k)
 				}
 			}
 		}
-		w = &window{start: now}
+		w = &window{idx: idx, end: end, dur: dur}
 		l.m[key] = w
 	}
+	return w
+}
+
+// Allow counts one request and reports whether it is within the limit (counting the other replicas' requests too).
+func (l *Limiter) Allow(key string, act Act, now time.Time) bool {
+	idx, end := windowOf(now, act.Dur)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w := l.cur(key, idx, end, now, act.Dur)
+	if w.idx > idx {
+		return true // a request older than the window in force (clock skew between replicas): not counted
+	}
 	w.n++
-	return w.n <= act.N
+	if l.share {
+		if w.unsent == 0 {
+			l.dirty = append(l.dirty, key)
+		}
+		w.unsent++
+	}
+	return w.n+w.remote <= act.N
+}
+
+// TakeDeltas returns the local counts since the last call and starts over.
+func (l *Limiter) TakeDeltas() []LimitDelta {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]LimitDelta, 0, len(l.dirty))
+	for _, k := range l.dirty {
+		if w := l.m[k]; w != nil && w.unsent > 0 {
+			out = append(out, LimitDelta{Key: k, Idx: w.idx, Dur: w.dur, N: w.unsent})
+			w.unsent = 0
+		}
+	}
+	l.dirty = l.dirty[:0]
+	return out
+}
+
+// Merge adds another replica's counts; counts for a window that is already over are dropped.
+func (l *Limiter) Merge(ds []LimitDelta, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, d := range ds {
+		idx, end := windowOf(now, d.Dur)
+		if d.Idx != idx || d.N <= 0 {
+			continue
+		}
+		w := l.cur(d.Key, idx, end, now, d.Dur)
+		if w.idx == idx {
+			w.remote += d.N
+		}
+	}
 }
 
 // ── published ranges ──

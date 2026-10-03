@@ -44,6 +44,9 @@ type Gate struct {
 	stats map[string]int64 // verdict → count since start
 
 	metrics *gateMetrics // /metrics (nil in tests that do not need it)
+
+	cluster   *Cluster    // other replicas (nil: a single server)
+	remoteOps []ClusterOp // list changes from other replicas, persisted with the next ban batch (banMu)
 }
 
 func (g *Gate) count(v string) {

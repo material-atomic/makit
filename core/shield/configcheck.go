@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -340,6 +341,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 		c.add("error", c.line("ban_scope"), "ban_scope", "ban_scope must be server or site")
 	}
 	c.listeners(cfg, opt, len(trusted) > 0)
+	c.cluster(cfg.Cluster)
 	c.report(cfg.Report.Every, cfg.Report.MinLevel, "report")
 	if opt.Channels != nil {
 		known := map[string]bool{}
@@ -383,6 +385,34 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 		if s.Report.MinLevel != "" {
 			c.report("", s.Report.MinLevel, "sites", strconv.Itoa(i), "report")
 		}
+	}
+}
+
+func (c *checker) cluster(cl ClusterConfig) {
+	if cl.Listen == "" && len(cl.Peers) == 0 {
+		return
+	}
+	if !cl.Enabled() {
+		c.add("warning", c.line("cluster"), "cluster", "cluster needs both listen and peers: as it is, this replica shares nothing")
+		return
+	}
+	if _, port, err := net.SplitHostPort(cl.Listen); err != nil || port == "" {
+		c.add("error", c.line("cluster", "listen"), "listen", fmt.Sprintf("cluster listen %q must be [address]:port, e.g. :9181", cl.Listen))
+	}
+	for i, p := range cl.Peers {
+		hostPort := strings.TrimPrefix(p, "dns:")
+		if _, _, err := net.SplitHostPort(hostPort); err != nil {
+			c.add("error", c.line("cluster", "peers", strconv.Itoa(i)), "peers",
+				fmt.Sprintf("cluster peer %q: host:port, or dns:NAME:PORT for every address of a name", p))
+		}
+	}
+	if cl.Sync != "" {
+		if d, err := time.ParseDuration(cl.Sync); err != nil || d < 100*time.Millisecond {
+			c.add("error", c.line("cluster", "sync"), "sync", fmt.Sprintf("cluster sync %q: a duration of 100ms or more", cl.Sync))
+		}
+	}
+	if _, err := cl.secret(); err != nil {
+		c.add("warning", c.line("cluster"), "cluster", err.Error()+" — the gate will not start without it")
 	}
 }
 

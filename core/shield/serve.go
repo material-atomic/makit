@@ -392,6 +392,16 @@ func Serve(cfgPath string, dirs []string) error {
 			}
 		}
 		p.Limiter = limiter
+		if g.cluster != nil { // counts are exchanged with the other replicas
+			limiter.Share()
+			if p.Tracker != nil {
+				p.Tracker.Share()
+			}
+			if p.BotTracker != nil {
+				p.BotTracker.Share()
+			}
+			g.cluster.StateLoaded(st)
+		}
 		p.Share() // sites use the same trackers, verifier, limiter and ban writer
 		cfg = c
 		current.Store(c)
@@ -425,12 +435,25 @@ func Serve(cfgPath string, dirs []string) error {
 		log.Printf("shield: mode=%s ask=%v edge=%v block=%d lists=%d allow=%d rules=%d trusted=%d listeners=%d", c.Mode, c.Ask, c.Edge, len(st.Block), lists.Len(), len(st.Allow)+len(c.Allow), len(p.Rules), len(p.Trusted), len(c.Listeners))
 		return nil
 	}
+	if cfg.Cluster.Enabled() {
+		if g.cluster, err = NewCluster(g, cfg.Cluster); err != nil {
+			return err
+		}
+	}
 	if err := load(); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go g.banWriter(ctx)
+	if g.cluster != nil {
+		go func() {
+			if err := g.cluster.Run(ctx); err != nil {
+				log.Printf("shield: %v", err)
+				stop()
+			}
+		}()
+	}
 	go g.reportLoop(ctx, func() *Config { return current.Load() })
 
 	mux := http.NewServeMux()
@@ -443,10 +466,18 @@ func Serve(cfgPath string, dirs []string) error {
 		p := g.policy.Load()
 		cfg := current.Load() // the config in force (reloads replace it)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": Version, "mode": cfg.Mode, "ask": cfg.Ask, "edge": cfg.Edge,
+		out := map[string]any{"version": Version, "mode": cfg.Mode, "ask": cfg.Ask, "edge": cfg.Edge,
 			"edge_error": edgeErr.Load(), "stats": g.Stats(),
 			"block": p.Block.Len(), "lists": p.Lists.Len(), "allow": p.Allow.Len(), "rules": len(p.Rules),
-			"trusted": len(p.Trusted), "listeners": len(cfg.Listeners), "kernel_block": cfg.KernelBlock})
+			"trusted": len(p.Trusted), "listeners": len(cfg.Listeners), "kernel_block": cfg.KernelBlock}
+		if g.cluster != nil {
+			var peers []map[string]any
+			for _, ps := range g.cluster.Peers() {
+				peers = append(peers, map[string]any{"addr": ps.Addr, "last_ok": ps.LastOK, "error": ps.Err, "pending": ps.Pending})
+			}
+			out["cluster"] = map[string]any{"node": g.cluster.node, "peers": peers}
+		}
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	admin, err := net.Listen("tcp", cfg.Admin)
 	if err != nil {
@@ -562,6 +593,7 @@ func (g *Gate) autoBan(a netip.Addr, d time.Duration, source, reason, site strin
 	} else {
 		p.Block.Add(e) // every site; effective for the next request already
 	}
+	g.cluster.publish("ban", e) // the other replicas, with the next sync
 	g.banMu.Lock()
 	if len(g.pending) < 200000 {
 		g.pending = append(g.pending, e)
@@ -587,9 +619,11 @@ func (g *Gate) banWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			g.flushBans()
+			g.flushRemote()
 			return
 		case <-t.C:
 			g.flushBans()
+			g.flushRemote()
 		}
 	}
 }
