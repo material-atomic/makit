@@ -4,9 +4,10 @@ Where makit is going next. There are no dates: a version ships when it is done a
 people need, so if something here matters to you — or is missing — say so in an
 [issue](https://github.com/material-atomic/makit/issues) or write to hello@makit.sh.
 
-## Next — v0.7: more edges, and what runs in the cluster
+## Next — v0.8: more edges, and what runs in the cluster
 
-v0.6 put the shield in front of clusters; v0.7 takes its bans to more edges and looks inside what runs there.
+v0.6 put the shield in front of clusters and v0.7 made it read any infrastructure in front; v0.8 takes its bans to
+more edges and looks inside what runs there.
 
 - **Push bans to more edges.** Cloudflare Lists and Google Cloud Armor, after AWS WAF.
 - **More load balancer logs.** Google Cloud and Azure load balancers next to AWS ALB.
@@ -31,6 +32,12 @@ v0.6 put the shield in front of clusters; v0.7 takes its bans to more edges and 
 
 ## Shipped
 
+- **v0.7.0** — the shield behind any CDN or load balancer: the visitor read from `X-Forwarded-For` (or `Forwarded`)
+  walked back through `trusted_proxies`, never from a provider's header such as `CF-Connecting-IP` that a client
+  could send past a load balancer; ask mode needs no header of makit's. Exploits carried in headers stopped by
+  catalog rules named by CVE (Next.js middleware bypass, Spring Cloud Function, Struts, F5, Fortinet, Rails, Symfony;
+  Shellshock scored); a fake crawler can no longer dodge the spoofed policy by making its reverse DNS fail; upgrades
+  restart the gate on the new version. Checked end to end behind terrarium's Cloudflare and load balancer stand-ins.
 - **v0.6.0** — the shield for clusters behind cloud load balancers: the client IP read from the right of
   `X-Forwarded-For` and from PROXY protocol, a signed container image and Helm chart, Envoy Gateway / Istio / Envoy /
   Traefik / ingress-nginx asking makit, replicas sharing bans, rate limits and scores (a ban reaches every pod in

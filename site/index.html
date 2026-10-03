@@ -210,7 +210,7 @@
             <span class="tag">makit shield</span>
             <h3>Protect</h3>
             <p>A gate for your web traffic: its own IP set (millions of entries, no ipset), allowlist, real client IPs
-              behind Cloudflare, rules and request scoring (probes, XSS, SQL injection), automatic bans. Caddy or nginx
+              behind any CDN or load balancer, rules and request scoring (probes, XSS, SQL injection), automatic bans. Caddy or nginx
               asks it, or it stands in front. One server, many domains, each with its own policy.</p>
             <a href="docs.html?p=shield">Shield →</a>
           </div>
@@ -341,18 +341,18 @@
 
     <section>
       <div class="wrap">
-        <h2>New in v0.6</h2>
-        <p class="sub">The shield for clusters behind a cloud load balancer: the load balancer keeps TLS, makit decides on
-          every request behind it — and a cluster is no easier to get through than one server.</p>
+        <h2>New in v0.7</h2>
+        <p class="sub">Whatever stands in front of your server — Cloudflare, a cloud load balancer, both, or nothing — makit
+          finds the real visitor, and stops the exploits that hide in headers.</p>
         <div class="grid">
-          <div class="card"><span class="tag">v0.6</span><h3>The real client IP</h3><p><code>X-Forwarded-For</code> read from the right past your trusted proxies, and PROXY protocol from an NLB: a client cannot pick its own IP.</p></div>
-          <div class="card"><span class="tag">v0.6</span><h3>makit in Kubernetes</h3><p>A signed image with an SBOM, a Helm chart and plain manifests, configured from a ConfigMap and reloaded without a restart.</p><a href="docs.html?p=kubernetes">Kubernetes guide →</a></div>
-          <div class="card"><span class="tag">v0.6</span><h3>Gateways ask makit</h3><p>Envoy Gateway and Istio (<code>ext_authz</code>), Envoy, Traefik <code>forwardAuth</code> and ingress-nginx <code>auth-url</code>: <code>makit shield snippet</code> prints the setup.</p></div>
-          <div class="card"><span class="tag">v0.6</span><h3>One shield, every replica</h3><p>Bans reach every pod in about 2 ms; <code>limit 60/1m</code> stays 60 for the cluster, not 60 × N — and no decision waits on the network.</p></div>
-          <div class="card"><span class="tag">v0.6</span><h3>At the load balancer</h3><p>Bans pushed to AWS WAF, ALB access logs scored with the same policy, Prometheus metrics for every decision.</p></div>
-          <div class="card"><span class="tag">v0.6</span><h3>Config you can trust</h3><p><code>makit shield config check</code>, <code>--replay</code> on a real log, and a playground that runs the same check in your browser.</p><a href="playground.html">Open the playground →</a></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Behind any CDN or load balancer</h3><p><code>X-Forwarded-For</code> walked back through your trusted proxies — Cloudflare, CloudFront, a DigitalOcean or AWS load balancer, or several. Never a provider header a client could send past one.</p><a href="docs.html?p=shield">How it reads the visitor →</a></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Nothing of makit's to configure</h3><p>Caddy, nginx, Traefik or Envoy ask makit with the headers every proxy already writes; makit's answer is for your infrastructure to use or ignore.</p></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Exploits in headers, by CVE</h3><p>Next.js middleware bypass, Spring Cloud Function, Struts, F5, Fortinet, Rails, Symfony, Shellshock — each replayed from its public proof of concept, at no measurable cost per request.</p></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Fake crawlers have nowhere to hide</h3><p>A fake Googlebot whose reverse DNS never answers is still outside Google's ranges: blocked as spoofed, checked again in 10 minutes.</p></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Upgrades take effect</h3><p><code>makit upgrade</code> restarts the gate on the new version, and <code>makit shield status</code> answers on every address the machine owns.</p></div>
+          <div class="card"><span class="tag">v0.7</span><h3>Proven end to end</h3><p>Visitor → Cloudflare → load balancer → server, replayed in tests: real visitors pass, forged headers are judged on the sender's own address.</p></div>
         </div>
-        <p class="sub" style="margin: 18px 0 0">Next, v0.7: bans pushed to more edges (Cloudflare Lists, Google Cloud Armor), more load balancer logs,
+        <p class="sub" style="margin: 18px 0 0">Next, v0.8: bans pushed to more edges (Cloudflare Lists, Google Cloud Armor), more load balancer logs,
           and <code>makit scan</code> for pods and images.</p>
         <p style="margin: 16px 0 0"><a href="docs.html?p=roadmap">Full roadmap →</a></p>
       </div>
