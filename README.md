@@ -262,8 +262,6 @@ Shell commands are one file each in `lib/cmd/` defining `cmd_<name>`; `bin/makit
 
 ## Roadmap
 
-Next is v0.6: the request shield for clusters behind a cloud load balancer (AWS ALB/NLB first). The real client IP
-read safely from `X-Forwarded-For` and PROXY protocol; a signed container image and Helm chart; Envoy `ext_authz`
-(Gateway API), Traefik and ingress-nginx in ask mode; bans, rate limits and scores shared by every replica without a
-network wait on the request path; Prometheus metrics; bans pushed to AWS WAF; ALB log analysis; and a config
-playground on makit.sh with `makit shield config check --replay` to see what a new config would block before it does. Everything planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).
+v0.6 brought the shield to clusters behind cloud load balancers. Next is v0.7: bans pushed to more edges
+(Cloudflare Lists, Google Cloud Armor), more load balancer logs, and `makit scan` for pods and images. Everything
+planned, and what is not, is in [ROADMAP.md](ROADMAP.md) (also at https://makit.sh/docs.html?p=roadmap).
