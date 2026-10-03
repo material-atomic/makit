@@ -38,6 +38,29 @@ visitors are disconnected right after the TCP handshake. Configure `listeners` i
 `tcp://` upstreams pass any TCP service through after the IP check (with a PROXY v1 header when
 `proxy_protocol: true`).
 
+### Gateways in Kubernetes ask makit
+
+The same ask mode works for the gateway in front of a cluster. `makit shield snippet` prints a ready setup:
+
+| Gateway | Command | How it asks |
+| --- | --- | --- |
+| Envoy Gateway (Gateway API) | `makit shield snippet envoy-gateway --gateway NAME --gateway-namespace NS` | `SecurityPolicy` `extAuth.http` + a `ReferenceGrant` |
+| Istio | `makit shield snippet istio` | `envoyExtAuthzHttp` provider + `AuthorizationPolicy` `CUSTOM` |
+| Envoy | `makit shield snippet envoy` | the `ext_authz` HTTP filter |
+| Traefik | `makit shield snippet traefik` | `forwardAuth` middleware |
+| ingress-nginx | `makit shield snippet ingress-nginx` | `auth-url` annotation (`?deny=403`: nginx passes only 401/403 on) |
+
+Envoy-based gateways send the auth service only a few headers unless told otherwise; the snippets list every header
+makit reads (`X-Forwarded-For`, `User-Agent`, `Accept-*`, `Sec-Fetch-Mode`, `Sec-CH-UA`, `Next-Action`, the Web Bot
+Auth signature headers, Cloudflare's) — without them a real browser would score like a script. Envoy asks on
+`/check/<original path>`; ingress-nginx sends the original URL in `X-Original-URL`; both are read as the visitor's
+request. The snippets fail open (`failOpen: true`, `failure_mode_allow`): if makit is unreachable, traffic goes on
+rather than the site going down — run two or more replicas with `/readyz`. ingress-nginx is retired upstream (no fixes
+after March 2026): prefer Envoy Gateway. Contour asks over gRPC only, which makit does not speak yet.
+
+In Kubernetes the admin address listens on the pod's address (`admin: 0.0.0.0:9180`); `/check`, `/status` and
+`/metrics` still answer only callers on private networks.
+
 ## Behind Cloudflare
 
 Behind Cloudflare every connection comes from a Cloudflare IP; the visitor's IP is in the `CF-Connecting-IP` header.

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -216,9 +217,7 @@ func (g *Gate) checkHandler() http.Handler {
 				hdr[lk] = strings.Join(v, ", ")
 			}
 		}
-		method := firstNonEmpty(h.Get("X-Forwarded-Method"), h.Get("X-Original-Method"), r.Method)
-		uri := firstNonEmpty(h.Get("X-Forwarded-Uri"), h.Get("X-Original-URI"), r.RequestURI)
-		host := firstNonEmpty(h.Get("X-Forwarded-Host"), r.Host)
+		method, uri, host := askedRequest(r)
 		q := Request{Peer: peer, Client: firstNonEmpty(h.Get("X-Makit-Client"), headerChain(h, g.header)), Method: method, Host: host,
 			URI: uri, UA: h.Get("User-Agent"), Referer: h.Get("Referer"), Country: h.Get("CF-IPCountry"), Ray: h.Get("CF-Ray"),
 			Headers: hdr, Received: time.Now()}
@@ -250,6 +249,42 @@ func (g *Gate) checkHandler() http.Handler {
 		g.record(snap)
 		w.WriteHeader(http.StatusOK)
 	})
+}
+
+// privateOnly answers only callers on this machine or its private networks (Prometheus, the CLI, a pod in the
+// cluster): in Kubernetes the admin address listens on every interface of the pod.
+func privateOnly(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ap, err := netip.ParseAddrPort(r.RemoteAddr); err != nil || !(ap.Addr().Unmap().IsLoopback() || ap.Addr().Unmap().IsPrivate()) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// askedRequest is the request a proxy asks about. Caddy, nginx and Traefik send it in X-Forwarded-Method/-Uri/-Host;
+// ingress-nginx in X-Original-Method/-URI and X-Original-URL (which also carries the host); Envoy ext_authz sends the
+// original method and host as they are and the original path after /check (path_prefix /check, or path: /check in
+// Envoy Gateway and Istio).
+func askedRequest(r *http.Request) (method, uri, host string) {
+	h := r.Header
+	method = firstNonEmpty(h.Get("X-Forwarded-Method"), h.Get("X-Original-Method"), r.Method)
+	uri = firstNonEmpty(h.Get("X-Forwarded-Uri"), h.Get("X-Original-URI"))
+	host = h.Get("X-Forwarded-Host")
+	if u := h.Get("X-Original-URL"); u != "" {
+		if pu, err := url.Parse(u); err == nil {
+			host = firstNonEmpty(host, pu.Host)
+			uri = firstNonEmpty(uri, pu.RequestURI())
+		}
+	}
+	if uri == "" {
+		uri = r.URL.RequestURI()
+		if rest, ok := strings.CutPrefix(uri, "/check"); ok && (strings.HasPrefix(rest, "/") || rest == "") {
+			uri = firstNonEmpty(rest, "/") // Envoy: /check/<original path and query>
+		}
+	}
+	return method, uri, firstNonEmpty(host, r.Host)
 }
 
 // headerChain joins every line of a header in order ("a, b" and a second line "c" → "a, b, c"): a forwarding chain
@@ -458,11 +493,12 @@ func Serve(cfgPath string, dirs []string) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/check", g.checkHandler())
+	mux.Handle("/check/", g.checkHandler()) // Envoy ext_authz appends the original path
 	inForce := func() *Config { return current.Load() }
-	mux.Handle("/metrics", g.metricsHandler(inForce))
+	mux.Handle("/metrics", privateOnly(g.metricsHandler(inForce)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/readyz", g.readyHandler(func() string { s, _ := edgeErr.Load().(string); return s }, inForce))
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/status", privateOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := g.policy.Load()
 		cfg := current.Load() // the config in force (reloads replace it)
 		w.Header().Set("Content-Type", "application/json")
@@ -478,7 +514,7 @@ func Serve(cfgPath string, dirs []string) error {
 			out["cluster"] = map[string]any{"node": g.cluster.node, "peers": peers}
 		}
 		_ = json.NewEncoder(w).Encode(out)
-	})
+	})))
 	admin, err := net.Listen("tcp", cfg.Admin)
 	if err != nil {
 		return err

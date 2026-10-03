@@ -34,6 +34,11 @@
   without a cluster (6.3–6.6 µs, 18 allocations). Messages are HMAC-signed with a time and sequence number; forged,
   old and replayed ones are refused. New replicas copy the bans of a running one. Peers in `makit shield status` and
   `/metrics`.
+- `makit shield snippet envoy-gateway|istio|envoy|traefik|ingress-nginx`: gateways in Kubernetes ask makit before every
+  request (Envoy Gateway SecurityPolicy + ReferenceGrant, Istio CUSTOM provider, the Envoy ext_authz filter, Traefik
+  forwardAuth, ingress-nginx auth-url), passing every header makit reads. `/check` understands Envoy's
+  `/check/<path>` and ingress-nginx's `X-Original-URL`. `/status` and `/metrics` answer only private callers, like
+  `/check`.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

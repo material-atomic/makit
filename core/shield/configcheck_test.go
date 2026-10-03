@@ -63,7 +63,7 @@ edge: true
 	got := issuesText(CheckConfig([]byte(cfg), CheckOptions{}))
 	for _, want := range []string{
 		"warning line 3: kernel_block is on with private trusted proxies",
-		"warning line 4: admin 0.0.0.0:9180 listens beyond this machine",
+		"warning line 4: admin 0.0.0.0:9180 listens on public addresses",
 		"warning line 5: mode pass",
 		"warning line 6: edge is on but no listeners",
 	} {

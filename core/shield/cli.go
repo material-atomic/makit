@@ -50,6 +50,8 @@ const usage = `makit shield — IP gate for web traffic (own IP set + allowlist,
                                 copy catalog files to edit locally; your copies override the bundled ones
   snippet caddy|nginx [--addr 127.0.0.1:9180]
                                 configuration that makes Caddy/nginx ask makit before every request
+  snippet envoy-gateway|istio|envoy|traefik|ingress-nginx [--service makit-shield --namespace makit --port 9180]
+                                the same for a gateway in Kubernetes (Envoy Gateway: --gateway NAME --gateway-namespace NS)
 `
 
 // Main is `makit-core shield …`.
@@ -477,8 +479,22 @@ func cmdSnippet(args []string) error {
 	kind, rest := splitFirst(args)
 	fs := flag.NewFlagSet("snippet", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:9180", "where the gate listens (Caddy in Docker: the host's bridge address, e.g. 172.17.0.1:9180)")
+	o := snippetOpts{}
+	fs.StringVar(&o.service, "service", "makit-shield", "Kubernetes: the makit Service")
+	fs.StringVar(&o.namespace, "namespace", "makit", "Kubernetes: its namespace")
+	fs.IntVar(&o.port, "port", 9180, "Kubernetes: its port")
+	fs.StringVar(&o.gateway, "gateway", "eg", "Envoy Gateway: the Gateway to protect")
+	fs.StringVar(&o.gatewayNS, "gateway-namespace", "default", "Envoy Gateway: its namespace")
 	if err := fs.Parse(rest); err != nil {
 		return err
+	}
+	if kind == "envoy" && *addr == "127.0.0.1:9180" {
+		*addr = fmt.Sprintf("%s.%s.svc.cluster.local:%d", o.service, o.namespace, o.port)
+	}
+	o.addr = *addr
+	if s, ok := k8sSnippet(kind, o); ok {
+		fmt.Print(s)
+		return nil
 	}
 	switch kind {
 	case "caddy":
@@ -520,7 +536,7 @@ location / {
 }
 `, *addr)
 	default:
-		return fmt.Errorf("snippet caddy|nginx")
+		return fmt.Errorf("snippet caddy|nginx|envoy-gateway|istio|envoy|traefik|ingress-nginx")
 	}
 	return nil
 }

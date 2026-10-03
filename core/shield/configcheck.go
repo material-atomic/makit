@@ -328,7 +328,7 @@ func (c *checker) config(cfg *Config, opt CheckOptions) {
 		c.add("error", c.line("admin"), "admin", fmt.Sprintf("admin %q must be host:port, e.g. 127.0.0.1:9180", cfg.Admin))
 	} else if a, err := netip.ParseAddr(host); host == "" || (err == nil && !a.IsLoopback() && !a.IsPrivate()) {
 		c.add("warning", c.line("admin"), "admin",
-			fmt.Sprintf("admin %s listens beyond this machine and its private networks: /status and /metrics should not be public", cfg.Admin))
+			fmt.Sprintf("admin %s listens on public addresses: fine in a Kubernetes pod (private network), but on a server with a public IP keep it on 127.0.0.1 or a private address — /check, /status and /metrics answer only private callers, still", cfg.Admin))
 	}
 	for i, a := range cfg.Allow {
 		if _, err := ParsePrefix(a); err != nil {
