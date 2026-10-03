@@ -2,12 +2,15 @@ package shield
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/netip"
+	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +32,30 @@ type LogLine struct {
 // nginx: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer"
 // "$http_user_agent" ["$http_cf_connecting_ip" ["$host"]]
 func parseNginx(line string) (LogLine, bool) {
+	f, ok := logFields(line)
+	if !ok || len(f) < 9 {
+		return LogLine{}, false
+	}
+	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", f[3])
+	if err != nil {
+		return LogLine{}, false
+	}
+	status, _ := strconv.Atoi(f[5])
+	r := Request{Peer: f[0], Raw: f[4], Status: status, Referer: dash(f[7]), UA: dash(f[8]), Received: t}
+	if parts := strings.Fields(f[4]); len(parts) == 3 && strings.HasPrefix(parts[2], "HTTP/") {
+		r.Method, r.URI = parts[0], parts[1]
+	}
+	if len(f) > 9 {
+		r.Client = dash(f[9])
+	}
+	if len(f) > 10 {
+		r.Host = dash(f[10])
+	}
+	return LogLine{Request: r, Format: "nginx"}, true
+}
+
+// logFields splits an access-log line into fields: words, "quoted strings" (with \ escapes) and [bracketed] times.
+func logFields(line string) ([]string, bool) {
 	var f []string
 	i := 0
 	for i < len(line) {
@@ -51,7 +78,7 @@ func parseNginx(line string) (LogLine, bool) {
 		case c == '[':
 			j := strings.IndexByte(line[i:], ']')
 			if j < 0 {
-				return LogLine{}, false
+				return nil, false
 			}
 			f = append(f, line[i+1:i+j])
 			i += j + 1
@@ -64,25 +91,39 @@ func parseNginx(line string) (LogLine, bool) {
 			i += j
 		}
 	}
-	if len(f) < 9 {
+	return f, true
+}
+
+// AWS Application Load Balancer access logs: type time elb client:port target:port request_processing_time
+// target_processing_time response_processing_time elb_status_code target_status_code received_bytes sent_bytes
+// "request" "user_agent" ssl_cipher ssl_protocol target_group_arn "trace_id" "domain_name" … The ALB is the edge, so
+// client:port is the visitor. Behind CloudFront or Cloudflare it is their address instead, and the log has no
+// X-Forwarded-For to recover the visitor from: analyse the gateway's or the app's log there.
+var albTypes = map[string]bool{"http": true, "https": true, "h2": true, "grpcs": true, "ws": true, "wss": true}
+
+func parseALB(line string) (LogLine, bool) {
+	f, ok := logFields(line)
+	if !ok || len(f) < 14 || !albTypes[f[0]] {
 		return LogLine{}, false
 	}
-	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", f[3])
+	t, err := time.Parse(time.RFC3339Nano, f[1])
 	if err != nil {
 		return LogLine{}, false
 	}
-	status, _ := strconv.Atoi(f[5])
-	r := Request{Peer: f[0], Raw: f[4], Status: status, Referer: dash(f[7]), UA: dash(f[8]), Received: t}
-	if parts := strings.Fields(f[4]); len(parts) == 3 && strings.HasPrefix(parts[2], "HTTP/") {
-		r.Method, r.URI = parts[0], parts[1]
+	status, _ := strconv.Atoi(f[8])
+	// Headers stay nil: the log has only the User-Agent, and a browser must not be scored for headers it was never
+	// asked for (no Accept, no Sec-Fetch-Mode…).
+	r := Request{Peer: f[3], Raw: f[12], Status: status, UA: dash(f[13]), Received: t}
+	if parts := strings.Fields(f[12]); len(parts) == 3 && parts[0] != "-" {
+		r.Method = parts[0]
+		if u, err := url.Parse(parts[1]); err == nil {
+			r.Host, r.URI = u.Hostname(), u.RequestURI()
+		}
 	}
-	if len(f) > 9 {
-		r.Client = dash(f[9])
+	if len(f) > 18 && dash(f[18]) != "" {
+		r.Host = f[18] // the SNI domain the visitor asked for
 	}
-	if len(f) > 10 {
-		r.Host = dash(f[10])
-	}
-	return LogLine{Request: r, Format: "nginx"}, true
+	return LogLine{Request: r, Format: "alb"}, true
 }
 
 func dash(s string) string {
@@ -131,10 +172,75 @@ func parseLogLine(line, format string) (LogLine, bool) {
 	if line == "" {
 		return LogLine{}, false
 	}
-	if format == "caddy" || (format == "auto" && line[0] == '{') {
+	switch {
+	case format == "caddy" || (format == "auto" && line[0] == '{'):
 		return parseCaddy(line)
+	case format == "alb":
+		return parseALB(line)
+	case format == "auto":
+		if sp := strings.IndexByte(line, ' '); sp > 0 && albTypes[line[:sp]] {
+			return parseALB(line)
+		}
 	}
 	return parseNginx(line)
+}
+
+// openLog opens an access log for reading once: a file, a .gz file (ALB logs come gzipped from S3), or a directory of
+// them read in name order (ALB names carry the time). "-" is stdin.
+func openLog(path string) (io.ReadCloser, error) {
+	if path == "-" {
+		return io.NopCloser(os.Stdin), nil
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	files := []string{path}
+	if st.IsDir() {
+		files = nil
+		ents, err := os.ReadDir(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range ents {
+			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".log") || strings.HasSuffix(e.Name(), ".gz")) {
+				files = append(files, filepath.Join(path, e.Name()))
+			}
+		}
+		sort.Strings(files)
+		if len(files) == 0 {
+			return nil, fmt.Errorf("%s: no .log or .gz files", path)
+		}
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		for _, name := range files {
+			f, err := os.Open(name)
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			var r io.Reader = f
+			if strings.HasSuffix(name, ".gz") {
+				zr, err := gzip.NewReader(f)
+				if err != nil {
+					f.Close()
+					pw.CloseWithError(fmt.Errorf("%s: %w", name, err))
+					return
+				}
+				r = zr
+			}
+			_, err = io.Copy(pw, r)
+			f.Close()
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			_, _ = pw.Write([]byte("\n"))
+		}
+		pw.Close()
+	}()
+	return pr, nil
 }
 
 type analyzeOpts struct {
@@ -151,7 +257,7 @@ access_log /var/log/nginx/access.log makit;`
 func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	o := analyzeOpts{}
-	fs.StringVar(&o.format, "format", "auto", "nginx, caddy or auto")
+	fs.StringVar(&o.format, "format", "auto", "nginx, caddy, alb (AWS ALB; .gz files and directories too) or auto")
 	fs.StringVar(&o.batch, "batch", "5m", "report window (log time)")
 	fs.BoolVar(&o.follow, "follow", false, "keep reading as the log grows (survives rotation)")
 	fs.BoolVar(&o.ban, "ban", false, "apply the policy's bans (makit shield ban), instead of only reporting")
@@ -326,7 +432,7 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 		return err
 	}
 	if parsed == 0 {
-		return fmt.Errorf("no access-log lines recognised (%d skipped) — nginx combined/makit format or Caddy JSON\n\n%s", skipped, nginxFormatHint)
+		return fmt.Errorf("no access-log lines recognised (%d skipped) — nginx combined/makit format, Caddy JSON or AWS ALB\n\n%s", skipped, nginxFormatHint)
 	}
 	if skipped > 0 {
 		fmt.Fprintf(os.Stderr, "(%d lines not recognised, skipped)\n", skipped)
@@ -337,6 +443,24 @@ func cmdAnalyze(cfgPath string, dirs []string, args []string) error {
 // readLines reads a file (or stdin for "-"); with follow it waits for new lines and reopens the file when it is
 // rotated, calling idle about once a second while waiting.
 func readLines(path string, follow bool, fn func(string) error, idle func() error) error {
+	if st, err := os.Stat(path); path != "-" && err == nil && (st.IsDir() || strings.HasSuffix(path, ".gz")) {
+		if follow {
+			return fmt.Errorf("%s: --follow needs a plain log file", path)
+		}
+		r, err := openLog(path)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 64*1024), 1<<20)
+		for sc.Scan() {
+			if err := fn(sc.Text()); err != nil {
+				return err
+			}
+		}
+		return sc.Err()
+	}
 	var f *os.File
 	var err error
 	if path == "-" {

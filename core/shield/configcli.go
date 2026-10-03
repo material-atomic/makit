@@ -24,7 +24,7 @@ func cmdConfig(cfgPath string, dirs []string, args []string) error {
 	}
 	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
 	replay := fs.String("replay", "", "an access log to run the new config against, next to the current one")
-	format := fs.String("format", "auto", "access log format: auto, nginx or caddy")
+	format := fs.String("format", "auto", "access log format: auto, nginx, caddy or alb")
 	against := fs.String("against", cfgPath, "the current config to compare with")
 	asJSON := fs.Bool("json", false, "JSON output")
 	n := fs.Int("n", 10, "examples to show")
@@ -146,7 +146,7 @@ func replayConfigs(currentPath string, next []byte, dirs []string, logPath, form
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(logPath)
+	f, err := openLog(logPath)
 	if err != nil {
 		return nil, err
 	}

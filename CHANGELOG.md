@@ -48,6 +48,9 @@
   and cloud load balancers (`makit docs kubernetes`). `tests/k8s-e2e.sh` checks it on kind: 3 replicas, CLI and
   automatic bans enforced everywhere, live config, `limit 10/1m` letting 11 of 30 requests through across replicas
   (27 with `cluster:` off).
+- `makit shield analyze` and `config check --replay` read AWS ALB access logs (`--format alb` or detected), `.gz` files
+  and directories of them, as S3 delivers them. Logs that keep only the User-Agent (ALB, nginx) no longer get
+  header-based bot signals in replay — a browser was scored for headers the log never had.
 
 ## v0.5.0
 - `makit shield`: a gate for web traffic, in front of every request.

@@ -1,6 +1,7 @@
 package shield
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -146,14 +147,15 @@ func TestReplay(t *testing.T) {
 	if !r.First.Equal(time.Date(2026, 10, 3, 9, 10, 0, 0, time.UTC)) {
 		t.Errorf("first: %v", r.First)
 	}
-	// A browser the app answered 200 that a new rule blocks is flagged as a likely false positive.
-	strict, _ := ParseConfig([]byte("mode: block\nallow: []\nbots:\n  score:\n    actions: { suspect: block, likely: block, bot: block }\n"), "strict")
-	s, sc, err := replayPolicy(strict, []string{repoCatalog}, &State{}, NewSet())
+	// A browser the app answered 200 that the new policy blocks is flagged as a likely false positive.
+	strict, _ := ParseConfig([]byte("mode: block\n"), "strict")
+	banned := &State{Block: []Entry{{Prefix: netip.MustParsePrefix("192.0.2.50/32"), Source: "manual"}}}
+	s, sc, err := replayPolicy(strict, []string{repoCatalog}, banned, NewSet())
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, ac, _ = replayPolicy(cur, []string{repoCatalog}, &State{}, NewSet())
-	r, _ = Replay(a, s, ac, sc, strings.NewReader(`192.0.2.50 - - [03/Oct/2026:09:10:01 +0000] "GET / HTTP/1.1" 200 5 "-" "Mozilla/5.0"`), "auto", 10)
+	r, _ = Replay(a, s, ac, sc, strings.NewReader(`192.0.2.50 - - [03/Oct/2026:09:10:01 +0000] "GET / HTTP/1.1" 200 5 "-" "Mozilla/5.0 (Windows NT 10.0) Chrome/126"`), "auto", 10)
 	if r.Changes["allowed → blocked"] != 1 || r.Likely != 1 {
 		t.Errorf("a blocked browser answered 200 must be a likely false positive: %+v", r)
 	}

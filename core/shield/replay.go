@@ -119,13 +119,7 @@ func Replay(cur, next *Policy, curClock, nextClock *time.Time, log io.Reader, fo
 			}
 			continue
 		}
-		r := ll.Request
-		if r.Headers == nil {
-			r.Headers = map[string]string{}
-			if r.UA != "" {
-				r.Headers["user-agent"] = r.UA
-			}
-		}
+		r := ll.Request // Headers stay nil when the log has none: header-based bot signals are then skipped
 		*curClock, *nextClock = r.Received, r.Received
 		a, b := cur.Decide(r), next.Decide(r)
 		res.Requests++

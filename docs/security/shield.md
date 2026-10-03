@@ -348,6 +348,20 @@ Caddy's JSON access log is read as is, request headers included (cookies and aut
 codes count in log analysis (many 4xx, the app answering 5xx to probes), and claimed bots are verified by reverse DNS
 (`--verify=false` for speed). Without `--ban` nothing is written; with it, bans go to the same list the gate uses.
 
+**AWS Application Load Balancer** access logs are read too — as delivered to S3, one gzipped file per node every five
+minutes. Point `analyze` (or `config check --replay`) at a file or at a directory of them:
+
+```bash
+aws s3 sync s3://my-alb-logs/AWSLogs/123456789012/elasticloadbalancing/us-east-2/2026/10/03/ ./alb
+makit shield analyze ./alb --verify=false            # every .log.gz in name order, i.e. in time
+makit shield config check new.yaml --replay ./alb    # what a new config would change, on real traffic
+```
+
+The ALB is the edge, so its `client:port` is the visitor (behind CloudFront or Cloudflare it is theirs, and the log
+has nothing more: analyse the gateway's log there). The log records the User-Agent and no other header, so
+header-based bot signals are not applied to it (nor to nginx's) — a browser is never scored for headers the log
+did not keep.
+
 ## Checking a config before it is loaded
 
 `makit shield edit` opens a copy of `shield.yaml` and saves it only when nothing in it is wrong; a file you write
